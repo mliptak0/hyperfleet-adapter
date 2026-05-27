@@ -166,6 +166,7 @@ func (v *TaskConfigValidator) ValidateSemantic() error {
 	v.validateCELExpressions()
 	v.validateK8sManifests()
 	v.validateLifecycleConfig()
+	v.validateRecreateConfig()
 
 	if v.errors.HasErrors() {
 		return v.errors
@@ -618,6 +619,17 @@ func (v *TaskConfigValidator) validateLifecycleConfig() {
 		// Validate when.expression: must be valid CEL
 		path := basePath + "." + FieldLifecycleWhen + "." + FieldExpression
 		v.validateCELExpression(del.When.Expression, path)
+	}
+}
+
+func (v *TaskConfigValidator) validateRecreateConfig() {
+	for i, resource := range v.config.Resources {
+		if resource.RecreateOnChange && resource.RecreateOptions != nil {
+			path := fmt.Sprintf("%s[%d]", FieldResources, i)
+			v.errors.Add(path,
+				fmt.Sprintf("resource %q: recreate_options and recreate_on_change are mutually exclusive",
+					resource.Name))
+		}
 	}
 }
 

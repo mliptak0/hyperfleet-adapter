@@ -1399,6 +1399,165 @@ func TestPreconditionCapture_FieldDefault(t *testing.T) {
 	}
 }
 
+// TestExtractAdapterStatusParams tests the extractAdapterStatusParams method.
+func TestExtractAdapterStatusParams(t *testing.T) {
+	baseConfig := func(paramName string) *configloader.Config {
+		return &configloader.Config{
+			Adapter: configloader.AdapterInfo{Name: "test-adapter"},
+			Params: []configloader.Parameter{
+				{Name: paramName, Source: "adapter_status"},
+			},
+		}
+	}
+
+	t.Run("injects snapshot when adapter status found", func(t *testing.T) {
+		snapshot := map[string]interface{}{
+			"spec": map[string]interface{}{"region": "us-east-1"},
+		}
+		listResp := map[string]interface{}{
+			"items": []map[string]interface{}{
+				{"adapter": "test-adapter", "applied_resource_snapshot": snapshot},
+			},
+			"page": 1, "size": 1, "total": 1,
+		}
+		body, _ := json.Marshal(listResp)
+
+		apiClient := hyperfleetapi.NewMockClient()
+		apiClient.GetResponse = &hyperfleetapi.Response{StatusCode: 200, Status: "200 OK", Body: body}
+
+		executor := &Executor{
+			config: &ExecutorConfig{
+				Config:    baseConfig("previous"),
+				APIClient: apiClient,
+				Logger:    logger.NewTestLogger(),
+			},
+			log: logger.NewTestLogger(),
+		}
+
+		execCtx := NewExecutionContext(context.Background(), map[string]interface{}{"id": "cluster-1"}, baseConfig("previous"))
+
+		err := executor.extractAdapterStatusParams(context.Background(), execCtx)
+		require.NoError(t, err)
+
+		previous, ok := execCtx.Params["previous"]
+		require.True(t, ok, "previous param should be set")
+		previousMap, ok := previous.(map[string]interface{})
+		require.True(t, ok)
+		spec, _ := previousMap["spec"].(map[string]interface{})
+		assert.Equal(t, "us-east-1", spec["region"])
+	})
+
+	t.Run("injects empty map when adapter not found in status list (first apply)", func(t *testing.T) {
+		listResp := map[string]interface{}{
+			"items": []map[string]interface{}{
+				{"adapter": "other-adapter", "applied_resource_snapshot": map[string]interface{}{"x": 1}},
+			},
+			"page": 1, "size": 1, "total": 1,
+		}
+		body, _ := json.Marshal(listResp)
+
+		apiClient := hyperfleetapi.NewMockClient()
+		apiClient.GetResponse = &hyperfleetapi.Response{StatusCode: 200, Status: "200 OK", Body: body}
+
+		executor := &Executor{
+			config: &ExecutorConfig{
+				Config:    baseConfig("previous"),
+				APIClient: apiClient,
+				Logger:    logger.NewTestLogger(),
+			},
+			log: logger.NewTestLogger(),
+		}
+
+		execCtx := NewExecutionContext(context.Background(), map[string]interface{}{"id": "cluster-1"}, baseConfig("previous"))
+
+		err := executor.extractAdapterStatusParams(context.Background(), execCtx)
+		require.NoError(t, err)
+
+		previous, ok := execCtx.Params["previous"]
+		require.True(t, ok, "previous param should be set even when not found")
+		previousMap, ok := previous.(map[string]interface{})
+		require.True(t, ok)
+		assert.Empty(t, previousMap, "empty map for first apply")
+	})
+
+	t.Run("injects empty map on API error (first apply)", func(t *testing.T) {
+		apiClient := hyperfleetapi.NewMockClient()
+		apiClient.GetError = fmt.Errorf("connection refused")
+
+		executor := &Executor{
+			config: &ExecutorConfig{
+				Config:    baseConfig("previous"),
+				APIClient: apiClient,
+				Logger:    logger.NewTestLogger(),
+			},
+			log: logger.NewTestLogger(),
+		}
+
+		execCtx := NewExecutionContext(context.Background(), map[string]interface{}{"id": "cluster-1"}, baseConfig("previous"))
+
+		err := executor.extractAdapterStatusParams(context.Background(), execCtx)
+		require.NoError(t, err, "API error should not fail param extraction (first apply)")
+
+		previous, ok := execCtx.Params["previous"]
+		require.True(t, ok)
+		previousMap, ok := previous.(map[string]interface{})
+		require.True(t, ok)
+		assert.Empty(t, previousMap)
+	})
+
+	t.Run("injects empty map when no resource id in event data", func(t *testing.T) {
+		apiClient := hyperfleetapi.NewMockClient()
+
+		executor := &Executor{
+			config: &ExecutorConfig{
+				Config:    baseConfig("previous"),
+				APIClient: apiClient,
+				Logger:    logger.NewTestLogger(),
+			},
+			log: logger.NewTestLogger(),
+		}
+
+		// No "id" field in event data
+		execCtx := NewExecutionContext(context.Background(), map[string]interface{}{}, baseConfig("previous"))
+
+		err := executor.extractAdapterStatusParams(context.Background(), execCtx)
+		require.NoError(t, err)
+
+		previous, ok := execCtx.Params["previous"]
+		require.True(t, ok)
+		previousMap, ok := previous.(map[string]interface{})
+		require.True(t, ok)
+		assert.Empty(t, previousMap)
+		// No API call should have been made
+		assert.Empty(t, apiClient.Requests)
+	})
+
+	t.Run("no-op when no adapter_status params configured", func(t *testing.T) {
+		apiClient := hyperfleetapi.NewMockClient()
+		cfg := &configloader.Config{
+			Adapter: configloader.AdapterInfo{Name: "test-adapter"},
+			Params: []configloader.Parameter{
+				{Name: "clusterID", Source: "event.id"},
+			},
+		}
+
+		executor := &Executor{
+			config: &ExecutorConfig{
+				Config:    cfg,
+				APIClient: apiClient,
+				Logger:    logger.NewTestLogger(),
+			},
+			log: logger.NewTestLogger(),
+		}
+
+		execCtx := NewExecutionContext(context.Background(), map[string]interface{}{"id": "cluster-1"}, cfg)
+
+		err := executor.extractAdapterStatusParams(context.Background(), execCtx)
+		require.NoError(t, err)
+		assert.Empty(t, apiClient.Requests, "no API calls when no adapter_status params")
+	})
+}
+
 // helper functions for metrics assertions
 
 func findFamily(families []*dto.MetricFamily, name string) *dto.MetricFamily {

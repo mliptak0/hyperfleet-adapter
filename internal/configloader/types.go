@@ -343,6 +343,7 @@ type Resource struct {
 	Lifecycle         *ResourceLifecycle `yaml:"lifecycle,omitempty"`
 	NestedDiscoveries []NestedDiscovery  `yaml:"nested_discoveries,omitempty" validate:"dive"`
 	RecreateOnChange  bool               `yaml:"recreate_on_change,omitempty"`
+	RecreateOptions   *RecreateOptions   `yaml:"recreate_options,omitempty"`
 }
 
 // ResourceLifecycle defines the lifecycle behavior for a resource.
@@ -365,6 +366,20 @@ type LifecycleWhen struct {
 	// The resource is deleted only when the expression evaluates to true.
 	// Required when lifecycle.delete is configured.
 	Expression string `yaml:"expression,omitempty"`
+}
+
+// RecreateOptions defines conditional recreation behavior for a resource.
+// When configured, the adapter evaluates a CEL expression comparing the previous
+// applied snapshot against the current event payload to decide whether to recreate.
+// Mutually exclusive with recreate_on_change: true.
+type RecreateOptions struct {
+	// When is a CEL expression that receives `previous` (last applied snapshot from
+	// adapter status) and `current` (current event payload) and returns true when
+	// recreation is required. Required.
+	When string `yaml:"when" validate:"required"`
+	// Migration controls the recreation order. Only "delete_first" is supported.
+	// Defaults to "delete_first" if omitted.
+	Migration string `yaml:"migration,omitempty" validate:"omitempty,oneof=delete_first"`
 }
 
 // NestedDiscovery defines a named discovery for a sub-resource within the parent manifest.

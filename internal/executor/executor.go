@@ -234,7 +234,105 @@ func (e *Executor) executeParamExtraction(execCtx *ExecutionContext) error {
 
 	// config.* param sources resolve against the real (unredacted) config so that
 	// sensitive fields like cert paths can still be explicitly extracted when needed.
-	return extractConfigParams(e.config.Config, execCtx, configMap)
+	if err := extractConfigParams(e.config.Config, execCtx, configMap); err != nil {
+		return err
+	}
+
+	// Extract adapter_status params (requires API client — done after normal extraction)
+	return e.extractAdapterStatusParams(execCtx.Ctx, execCtx)
+}
+
+// extractAdapterStatusParams fetches the adapter status from the HyperFleet API and populates
+// any params with source == "adapter_status" in execCtx.Params.
+//
+// The endpoint GET /api/hyperfleet/v1/clusters/{id}/statuses returns an array of status
+// objects. Each object has an "adapter" field identifying the adapter and an
+// "applied_resource_snapshot" field containing the last applied snapshot.
+//
+// On first apply (no previous status found), the param is set to an empty map so that
+// CEL expressions can still reference it without error (e.g., previous.?spec.orValue(...)).
+func (e *Executor) extractAdapterStatusParams(ctx context.Context, execCtx *ExecutionContext) error {
+	// Collect all params that require adapter_status
+	var statusParams []configloader.Parameter
+	for _, param := range e.config.Config.Params {
+		if param.Source == "adapter_status" {
+			statusParams = append(statusParams, param)
+		}
+	}
+	if len(statusParams) == 0 {
+		return nil
+	}
+
+	// Determine the resource ID from the event data ("id" field)
+	resourceID, _ := execCtx.EventData["id"].(string)
+	if resourceID == "" {
+		// No resource ID: treat as first apply — inject empty maps
+		for _, param := range statusParams {
+			execCtx.Params[param.Name] = map[string]interface{}{}
+		}
+		e.log.Debugf(ctx, "adapter_status: no resource id in event data, injecting empty maps for %d params", len(statusParams))
+		return nil
+	}
+
+	// Build the statuses URL: /api/hyperfleet/v1/clusters/{id}/statuses
+	statusURL := "/api/hyperfleet/v1/clusters/" + resourceID + "/statuses"
+	e.log.Debugf(ctx, "adapter_status: fetching %s", statusURL)
+
+	resp, err := e.config.APIClient.Get(ctx, statusURL)
+	if err != nil || resp == nil || !resp.IsSuccess() {
+		// On error (e.g., 404 Not Found on first apply) — inject empty maps, don't fail
+		for _, param := range statusParams {
+			execCtx.Params[param.Name] = map[string]interface{}{}
+		}
+		if err != nil {
+			e.log.Debugf(ctx, "adapter_status: GET %s failed (treating as first apply): %v", statusURL, err)
+		} else {
+			e.log.Debugf(ctx, "adapter_status: GET %s returned %d (treating as first apply)", statusURL, resp.StatusCode)
+		}
+		return nil
+	}
+
+	// Parse response body — the API returns a paginated list: {"items": [...], "page": N, ...}
+	var listResp struct {
+		Items []map[string]interface{} `json:"items"`
+	}
+	if jsonErr := json.Unmarshal(resp.Body, &listResp); jsonErr != nil {
+		e.log.Debugf(ctx, "adapter_status: failed to parse response: %v; injecting empty maps", jsonErr)
+		for _, param := range statusParams {
+			execCtx.Params[param.Name] = map[string]interface{}{}
+		}
+		return nil
+	}
+	statusList := listResp.Items
+
+	// Find the status entry for this adapter
+	adapterName := e.config.Config.Adapter.Name
+	var snapshot map[string]interface{}
+	for _, item := range statusList {
+		if item["adapter"] == adapterName {
+			if s, ok := item["applied_resource_snapshot"].(map[string]interface{}); ok {
+				snapshot = s
+			}
+			break
+		}
+	}
+
+	// Inject the snapshot (or empty map for first apply) for each adapter_status param
+	for _, param := range statusParams {
+		if snapshot != nil {
+			execCtx.Params[param.Name] = snapshot
+		} else {
+			execCtx.Params[param.Name] = map[string]interface{}{}
+		}
+	}
+
+	if snapshot != nil {
+		e.log.Debugf(ctx, "adapter_status: injected snapshot for adapter=%s into %d params", adapterName, len(statusParams))
+	} else {
+		e.log.Debugf(ctx, "adapter_status: no snapshot found for adapter=%s (first apply), injected empty maps", adapterName)
+	}
+
+	return nil
 }
 
 // startTracedExecution creates an OTel span and adds trace context to logs.

@@ -156,9 +156,20 @@ func (re *ResourceExecutor) executeResource(
 		result.ResourceName = obj.GetName()
 	}
 
-	// Step 5: Prepare apply options
+	// Step 5: Prepare apply options — resolve recreation strategy
 	var applyOpts *transportclient.ApplyOptions
-	if resource.RecreateOnChange {
+	if resource.RecreateOptions != nil {
+		shouldRecreate, err := re.evaluateRecreateOptions(ctx, resource, execCtx)
+		if err != nil {
+			result.Status = StatusFailed
+			result.Error = err
+			re.recordResourceError(execCtx, resource, err)
+			return result, NewExecutorError(PhaseResources, resource.Name, "failed to evaluate recreate_options.when", err)
+		}
+		if shouldRecreate {
+			applyOpts = &transportclient.ApplyOptions{RecreateOnChange: true}
+		}
+	} else if resource.RecreateOnChange {
 		applyOpts = &transportclient.ApplyOptions{RecreateOnChange: true}
 	}
 
@@ -570,6 +581,58 @@ func (re *ResourceExecutor) evaluateLifecycleDeleteWhen(
 
 	execCtx.AddCELEvaluation(PhaseResources, resource.Name+"/lifecycle.delete.when", expression, celResult.Matched)
 	re.log.Debugf(ctx, "Resource[%s] lifecycle.delete.when=%q → matched=%v", resource.Name, expression, celResult.Matched)
+
+	return celResult.Matched, nil
+}
+
+// evaluateRecreateOptions evaluates the recreate_options.when CEL expression and returns
+// true if the resource should be recreated (delete + create).
+//
+// The CEL expression has access to all standard params (via GetCELVariables) plus
+// "current" (the current event payload). The "previous" snapshot is expected to
+// be present in execCtx.Params under whatever name the adapter config assigns to
+// the adapter_status param (conventionally "previous").
+//
+// If no previous snapshot exists (empty map or absent) — first apply — returns false
+// so the resource is applied normally without recreation.
+func (re *ResourceExecutor) evaluateRecreateOptions(
+	ctx context.Context,
+	resource configloader.Resource,
+	execCtx *ExecutionContext,
+) (bool, error) {
+	expression := resource.RecreateOptions.When
+
+	// Get previous snapshot from params — if absent or empty, skip evaluation (first apply).
+	// The param name is conventionally "previous" (set via source: adapter_status in the config).
+	previous, hasPrevious := execCtx.Params["previous"]
+	if !hasPrevious {
+		re.log.Debugf(ctx, "Resource[%s] recreate_options.when: no previous snapshot, skipping (first apply)", resource.Name)
+		return false, nil
+	}
+	previousMap, ok := previous.(map[string]interface{})
+	if !ok || len(previousMap) == 0 {
+		re.log.Debugf(ctx, "Resource[%s] recreate_options.when: empty previous snapshot, skipping (first apply)", resource.Name)
+		return false, nil
+	}
+
+	evalCtx := criteria.NewEvaluationContext()
+	// Inject all standard CEL variables (params, adapter, resources)
+	evalCtx.SetVariablesFromMap(execCtx.GetCELVariables())
+	// Inject current event payload explicitly so the CEL expression can reference it
+	evalCtx.Set("current", execCtx.EventData)
+
+	evaluator, err := criteria.NewEvaluator(ctx, evalCtx, re.log)
+	if err != nil {
+		return false, fmt.Errorf("failed to create CEL evaluator for recreate_options.when: %w", err)
+	}
+
+	celResult, err := evaluator.EvaluateCEL(expression)
+	if err != nil {
+		return false, fmt.Errorf("recreate_options.when expression %q failed to evaluate: %w", expression, err)
+	}
+
+	execCtx.AddCELEvaluation(PhaseResources, resource.Name+"/recreate_options.when", expression, celResult.Matched)
+	re.log.Debugf(ctx, "Resource[%s] recreate_options.when=%q → matched=%v", resource.Name, expression, celResult.Matched)
 
 	return celResult.Matched, nil
 }

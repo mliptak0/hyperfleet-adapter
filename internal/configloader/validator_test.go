@@ -1092,3 +1092,53 @@ func TestValidateLifecycleConfig(t *testing.T) {
 		require.NoError(t, v.ValidateSemantic())
 	})
 }
+
+func TestValidateRecreateConfig(t *testing.T) {
+	minDiscovery := &DiscoveryConfig{ByName: "my-resource"}
+	minManifest := map[string]interface{}{"apiVersion": "v1", "kind": "ConfigMap"}
+
+	t.Run("recreate_options alone is valid", func(t *testing.T) {
+		cfg := baseTaskConfig()
+		cfg.Params = []Parameter{{Name: "previous", Source: "event.id"}}
+		cfg.Resources = []Resource{{
+			Name:      "myResource",
+			Discovery: minDiscovery,
+			Manifest:  minManifest,
+			RecreateOptions: &RecreateOptions{
+				When: "previous != current",
+			},
+		}}
+		v := newTaskValidator(cfg)
+		require.NoError(t, v.ValidateStructure())
+		require.NoError(t, v.ValidateSemantic())
+	})
+
+	t.Run("recreate_on_change alone is valid", func(t *testing.T) {
+		cfg := baseTaskConfig()
+		cfg.Resources = []Resource{{
+			Name:             "myResource",
+			Discovery:        minDiscovery,
+			Manifest:         minManifest,
+			RecreateOnChange: true,
+		}}
+		v := newTaskValidator(cfg)
+		require.NoError(t, v.ValidateStructure())
+		require.NoError(t, v.ValidateSemantic())
+	})
+
+	t.Run("recreate_options and recreate_on_change are mutually exclusive", func(t *testing.T) {
+		cfg := baseTaskConfig()
+		cfg.Resources = []Resource{{
+			Name:             "myResource",
+			Discovery:        minDiscovery,
+			Manifest:         minManifest,
+			RecreateOnChange: true,
+			RecreateOptions: &RecreateOptions{
+				When: "previous != current",
+			},
+		}}
+		err := newTaskValidator(cfg).ValidateSemantic()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "recreate_options and recreate_on_change are mutually exclusive")
+	})
+}

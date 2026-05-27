@@ -1703,3 +1703,127 @@ func TestResourceExecutor_LifecycleDelete_BySelectors(t *testing.T) {
 	assert.True(t, exists, "nil sentinel should be in execCtx.Resources")
 	assert.Nil(t, storedVal, "nil stored when post-delete discovery finds no resources")
 }
+
+// TestResourceExecutor_EvaluateRecreateOptions_FirstApply verifies that when there is no
+// previous snapshot (empty map), evaluateRecreateOptions returns false (no recreation).
+func TestResourceExecutor_EvaluateRecreateOptions_FirstApply(t *testing.T) {
+	mock := k8sclient.NewMockK8sClient()
+	mock.ApplyResourceResult = &transportclient.ApplyResult{
+		Operation: manifest.OperationCreate,
+		Reason:    "mock",
+	}
+	re := newResourceExecutor(&ExecutorConfig{
+		TransportClient: mock,
+		Logger:          logger.NewTestLogger(),
+	})
+
+	resource := configloader.Resource{
+		Name:      "test-resource",
+		Transport: &configloader.TransportConfig{Client: "kubernetes"},
+		Manifest: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]interface{}{
+				"name":      "test-cm",
+				"namespace": "default",
+			},
+		},
+		Discovery: &configloader.DiscoveryConfig{
+			ByName: "test-cm",
+		},
+		RecreateOptions: &configloader.RecreateOptions{
+			When: `previous.spec.region != current.spec.region`,
+		},
+	}
+
+	execCtx := NewExecutionContext(context.Background(), map[string]interface{}{"id": "cluster-1"}, nil)
+	// "previous" is absent — simulates first apply
+	// (adapter_status extractor would inject empty map, but here we just test the evaluator directly)
+	execCtx.Params["previous"] = map[string]interface{}{}
+
+	shouldRecreate, err := re.evaluateRecreateOptions(context.Background(), resource, execCtx)
+	require.NoError(t, err)
+	assert.False(t, shouldRecreate, "empty previous snapshot should not trigger recreation")
+}
+
+// TestResourceExecutor_EvaluateRecreateOptions_ExpressionTrue verifies that when the CEL
+// expression evaluates to true, evaluateRecreateOptions returns true.
+func TestResourceExecutor_EvaluateRecreateOptions_ExpressionTrue(t *testing.T) {
+	mock := k8sclient.NewMockK8sClient()
+	re := newResourceExecutor(&ExecutorConfig{
+		TransportClient: mock,
+		Logger:          logger.NewTestLogger(),
+	})
+
+	resource := configloader.Resource{
+		Name: "test-resource",
+		RecreateOptions: &configloader.RecreateOptions{
+			When: `previous.region != current.region`,
+		},
+	}
+
+	execCtx := NewExecutionContext(context.Background(), map[string]interface{}{
+		"id":     "cluster-1",
+		"region": "us-east-1",
+	}, nil)
+	execCtx.Params["previous"] = map[string]interface{}{
+		"region": "us-west-2", // different from current
+	}
+
+	shouldRecreate, err := re.evaluateRecreateOptions(context.Background(), resource, execCtx)
+	require.NoError(t, err)
+	assert.True(t, shouldRecreate, "expression true: previous.region != current.region should trigger recreation")
+}
+
+// TestResourceExecutor_EvaluateRecreateOptions_ExpressionFalse verifies that when the CEL
+// expression evaluates to false, evaluateRecreateOptions returns false.
+func TestResourceExecutor_EvaluateRecreateOptions_ExpressionFalse(t *testing.T) {
+	mock := k8sclient.NewMockK8sClient()
+	re := newResourceExecutor(&ExecutorConfig{
+		TransportClient: mock,
+		Logger:          logger.NewTestLogger(),
+	})
+
+	resource := configloader.Resource{
+		Name: "test-resource",
+		RecreateOptions: &configloader.RecreateOptions{
+			When: `previous.region != current.region`,
+		},
+	}
+
+	execCtx := NewExecutionContext(context.Background(), map[string]interface{}{
+		"id":     "cluster-1",
+		"region": "us-east-1",
+	}, nil)
+	execCtx.Params["previous"] = map[string]interface{}{
+		"region": "us-east-1", // same as current
+	}
+
+	shouldRecreate, err := re.evaluateRecreateOptions(context.Background(), resource, execCtx)
+	require.NoError(t, err)
+	assert.False(t, shouldRecreate, "expression false: same region should not trigger recreation")
+}
+
+// TestResourceExecutor_EvaluateRecreateOptions_NoPreviousParam verifies that when the
+// "previous" param is entirely absent from execCtx.Params, evaluateRecreateOptions returns false.
+func TestResourceExecutor_EvaluateRecreateOptions_NoPreviousParam(t *testing.T) {
+	mock := k8sclient.NewMockK8sClient()
+	re := newResourceExecutor(&ExecutorConfig{
+		TransportClient: mock,
+		Logger:          logger.NewTestLogger(),
+	})
+
+	resource := configloader.Resource{
+		Name: "test-resource",
+		RecreateOptions: &configloader.RecreateOptions{
+			When: `previous.region != current.region`,
+		},
+	}
+
+	execCtx := NewExecutionContext(context.Background(), map[string]interface{}{"id": "cluster-1"}, nil)
+	// "previous" not set at all
+
+	shouldRecreate, err := re.evaluateRecreateOptions(context.Background(), resource, execCtx)
+	require.NoError(t, err)
+	assert.False(t, shouldRecreate, "absent previous param should not trigger recreation (first apply)")
+}

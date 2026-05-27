@@ -85,9 +85,16 @@ const (
 const (
 	FieldManifest          = "manifest"
 	FieldRecreateOnChange  = "recreate_on_change"
+	FieldRecreateOptions   = "recreate_options"
 	FieldDiscovery         = "discovery"
 	FieldNestedDiscoveries = "nested_discoveries"
 	FieldLifecycle         = "lifecycle"
+)
+
+// RecreateOptions field names
+const (
+	FieldRecreateWhen      = "when"
+	FieldRecreateMigration = "migration"
 )
 
 // Lifecycle field names
