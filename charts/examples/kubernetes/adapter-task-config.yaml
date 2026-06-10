@@ -58,6 +58,19 @@ resources:
         propagationPolicy: Background
         when:
           expression: "is_deleting"
+      # Recreate the Job when the generation changes. Jobs have immutable fields
+      # (spec.selector, spec.template) that cannot be patched — an in-place update
+      # would fail. The expression compares the incoming generation with the
+      # generation annotation on the discovered Job; if they differ, the adapter
+      # deletes and recreates the resource.
+      # Use expression: "true" to always recreate on every apply.
+      recreate:
+        when:
+          expression: |
+            resources.?helloWorldJob.hasValue()
+            && has(resources.helloWorldJob.metadata)
+            && has(resources.helloWorldJob.metadata.annotations)
+            && string(generation) != resources.helloWorldJob.metadata.annotations["hyperfleet.io/generation"]
 
 post:
   payloads:

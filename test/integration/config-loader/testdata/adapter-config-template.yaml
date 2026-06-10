@@ -264,7 +264,6 @@ resources:
       by_name: "cluster-credentials-{{ .clusterId }}"
 
   - name: "validationJob"
-    recreate_on_change: true # Recreate the job if the generationId changes
     manifest:
       ref: "templates/job.yaml"
     discovery:
@@ -274,6 +273,10 @@ resources:
           hyperfleet.io/cluster-id: "{{ .clusterId }}"
           hyperfleet.io/resource-type: "job"
           hyperfleet.io/managed-by: "{{ .adapter.name }}"
+    lifecycle:
+      recreate:
+        when:
+          expression: "true"
   # ==========================================================================
   # Resource 4: Deployment
   # ==========================================================================

@@ -166,6 +166,7 @@ func (v *TaskConfigValidator) ValidateSemantic() error {
 	v.validateCELExpressions()
 	v.validateK8sManifests()
 	v.validateLifecycleConfig()
+	v.validateLifecycleRecreateConfig()
 
 	if v.errors.HasErrors() {
 		return v.errors
@@ -322,7 +323,7 @@ func (v *TaskConfigValidator) validateConditionValues() {
 	}
 }
 
-func (v *TaskConfigValidator) validateConditionValue(operator string, value interface{}, path string) {
+func (v *TaskConfigValidator) validateConditionValue(operator string, value any, path string) {
 	op := criteria.Operator(operator)
 
 	if op == criteria.OperatorExists {
@@ -425,9 +426,9 @@ func (v *TaskConfigValidator) validateTemplateVariables() {
 		// Validate post payload build value templates
 		for i, payload := range v.config.Post.Payloads {
 			if payload.Build != nil {
-				if buildMap, ok := payload.Build.(map[string]interface{}); ok {
-					v.validateTemplateMap(buildMap, fmt.Sprintf("%s.%s[%d].%s", FieldPost, FieldPayloads, i, FieldBuild))
-				}
+			if buildMap, ok := payload.Build.(map[string]any); ok {
+				v.validateTemplateMap(buildMap, fmt.Sprintf("%s.%s[%d].%s", FieldPost, FieldPayloads, i, FieldBuild))
+			}
 			}
 		}
 	}
@@ -473,20 +474,20 @@ func (v *TaskConfigValidator) isVariableDefined(varName string) bool {
 	return false
 }
 
-func (v *TaskConfigValidator) validateTemplateMap(m map[string]interface{}, path string) {
+func (v *TaskConfigValidator) validateTemplateMap(m map[string]any, path string) {
 	for key, value := range m {
 		currentPath := fmt.Sprintf("%s.%s", path, key)
 		switch val := value.(type) {
 		case string:
 			v.validateTemplateString(val, currentPath)
-		case map[string]interface{}:
+		case map[string]any:
 			v.validateTemplateMap(val, currentPath)
-		case []interface{}:
+		case []any:
 			for i, item := range val {
 				itemPath := fmt.Sprintf("%s[%d]", currentPath, i)
 				if str, ok := item.(string); ok {
 					v.validateTemplateString(str, itemPath)
-				} else if m, ok := item.(map[string]interface{}); ok {
+				} else if m, ok := item.(map[string]any); ok {
 					v.validateTemplateMap(m, itemPath)
 				}
 			}
@@ -509,9 +510,9 @@ func (v *TaskConfigValidator) validateCELExpressions() {
 	if v.config.Post != nil {
 		for i, payload := range v.config.Post.Payloads {
 			if payload.Build != nil {
-				if buildMap, ok := payload.Build.(map[string]interface{}); ok {
-					v.validateBuildExpressions(buildMap, fmt.Sprintf("%s.%s[%d].%s", FieldPost, FieldPayloads, i, FieldBuild))
-				}
+			if buildMap, ok := payload.Build.(map[string]any); ok {
+				v.validateBuildExpressions(buildMap, fmt.Sprintf("%s.%s[%d].%s", FieldPost, FieldPayloads, i, FieldBuild))
+			}
 			}
 		}
 	}
@@ -530,7 +531,7 @@ func (v *TaskConfigValidator) validateCELExpression(expr string, path string) {
 	}
 }
 
-func (v *TaskConfigValidator) validateBuildExpressions(m map[string]interface{}, path string) {
+func (v *TaskConfigValidator) validateBuildExpressions(m map[string]any, path string) {
 	for key, value := range m {
 		currentPath := fmt.Sprintf("%s.%s", path, key)
 		switch val := value.(type) {
@@ -538,12 +539,12 @@ func (v *TaskConfigValidator) validateBuildExpressions(m map[string]interface{},
 			if key == FieldExpression {
 				v.validateCELExpression(val, currentPath)
 			}
-		case map[string]interface{}:
+		case map[string]any:
 			v.validateBuildExpressions(val, currentPath)
-		case []interface{}:
+		case []any:
 			for i, item := range val {
 				itemPath := fmt.Sprintf("%s[%d]", currentPath, i)
-				if m, ok := item.(map[string]interface{}); ok {
+				if m, ok := item.(map[string]any); ok {
 					v.validateBuildExpressions(m, itemPath)
 				}
 			}
@@ -563,7 +564,7 @@ func (v *TaskConfigValidator) validateK8sManifests() {
 		// K8s structural validation is deferred to execution time since
 		// template parameters are not available at config load time.
 		// Only validate manifest ref is not empty.
-		if m, ok := resource.Manifest.(map[string]interface{}); ok {
+		if m, ok := resource.Manifest.(map[string]any); ok {
 			if ref, hasRef := m[FieldRef].(string); hasRef {
 				if ref == "" {
 					v.errors.Add(path+"."+FieldRef, "manifest ref cannot be empty")
@@ -621,11 +622,42 @@ func (v *TaskConfigValidator) validateLifecycleConfig() {
 	}
 }
 
+func (v *TaskConfigValidator) validateLifecycleRecreateConfig() {
+	for i, resource := range v.config.Resources {
+		if resource.Lifecycle == nil || resource.Lifecycle.Recreate == nil {
+			continue
+		}
+
+		recreate := resource.Lifecycle.Recreate
+		basePath := fmt.Sprintf("%s[%d].%s.%s", FieldResources, i, FieldLifecycle, FieldLifecycleRecreate)
+
+		if resource.Discovery == nil {
+			v.errors.Add(basePath,
+				"lifecycle.recreate requires discovery to be configured")
+		}
+
+		if recreate.When == nil {
+			v.errors.Add(basePath+"."+FieldLifecycleWhen,
+				"lifecycle.recreate.when is required")
+			continue
+		}
+
+		if recreate.When.Expression == "" {
+			v.errors.Add(basePath+"."+FieldLifecycleWhen+"."+FieldExpression,
+				"lifecycle.recreate.when.expression must not be empty")
+			continue
+		}
+
+		v.validateCELExpression(recreate.When.Expression,
+			basePath+"."+FieldLifecycleWhen+"."+FieldExpression)
+	}
+}
+
 // =============================================================================
 // HELPER FUNCTIONS
 // =============================================================================
 
-func isSliceOrArray(value interface{}) bool {
+func isSliceOrArray(value any) bool {
 	if value == nil {
 		return false
 	}

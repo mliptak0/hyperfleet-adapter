@@ -45,19 +45,18 @@ func (re *ResourceExecutor) ExecuteAll(
 	execCtx *ExecutionContext,
 ) ([]ResourceResult, error) {
 	if execCtx.Resources == nil {
-		execCtx.Resources = make(map[string]interface{})
+		execCtx.Resources = make(map[string]any)
 	}
 
-	// Pre-discover all resources before evaluating any lifecycle.delete.when expression.
-	// This ensures that when conditions can reference sibling resources regardless of their
-	// position in the list. For example, a namespace's when can check
-	// !resources.?jobServiceAccount.hasValue() even if jobServiceAccount comes later.
+	// Pre-discover all resources before evaluating any lifecycle.delete.when or
+	// lifecycle.recreate.when expression. This ensures that when conditions can reference
+	// sibling resources regardless of their position in the list.
 	// NotFound results are non-fatal and leave the resource absent from context.
 	// Any other error (RBAC, network, API server) is propagated to avoid incorrect
-	// "resource absent" conclusions that could trigger unwanted deletions.
-	// Skip the pass entirely when no resource has lifecycle.delete configured — avoids
-	// unnecessary discovery API calls for adapters that don't use this feature.
-	if hasLifecycleDelete(resources) {
+	// "resource absent" conclusions that could trigger unwanted deletions or recreations.
+	// Skip the pass entirely when no resource needs pre-discovery — avoids
+	// unnecessary discovery API calls for adapters that don't use these features.
+	if hasPreDiscoveryRequirement(resources) {
 		if err := re.preDiscoverAll(ctx, resources, execCtx); err != nil {
 			return nil, err
 		}
@@ -123,7 +122,7 @@ func (re *ResourceExecutor) executeResource(
 
 	// Step 2: Check lifecycle.delete — if the when-expression evaluates to true, delete the resource
 	// instead of applying it. This enables dependency-ordered deletion driven by CEL expressions.
-	if resource.Lifecycle != nil && resource.Lifecycle.Delete != nil {
+	if resource.Lifecycle != nil && resource.Lifecycle.Delete != nil && resource.Lifecycle.Delete.When != nil {
 		shouldDelete, delErr := re.evaluateLifecycleDeleteWhen(ctx, resource, execCtx)
 		if delErr != nil {
 			result.Status = StatusFailed
@@ -139,6 +138,25 @@ func (re *ResourceExecutor) executeResource(
 		re.log.Debugf(ctx, "Resource[%s] lifecycle.delete.when evaluated to false, applying normally", resource.Name)
 	}
 
+	// Step 2.5: Check lifecycle.recreate.when — if the CEL expression evaluates to true,
+	// delete and recreate the resource instead of updating it in-place.
+	var shouldRecreate bool
+	if resource.Lifecycle != nil && resource.Lifecycle.Recreate != nil && resource.Lifecycle.Recreate.When != nil {
+		recreate, recreateErr := re.evaluateLifecycleRecreateWhen(ctx, resource, execCtx)
+		if recreateErr != nil {
+			result.Status = StatusFailed
+			result.Operation = manifest.OperationRecreate
+			result.Error = recreateErr
+			re.recordResourceError(execCtx, resource, recreateErr)
+			return result, NewExecutorError(
+				PhaseResources, resource.Name, "failed to evaluate lifecycle.recreate.when", recreateErr)
+		}
+		if recreate {
+			re.log.Infof(ctx, "Resource[%s] lifecycle.recreate.when evaluated to true, will delete and recreate", resource.Name)
+			shouldRecreate = true
+		}
+	}
+
 	// Step 3: Render the manifest/manifestWork to bytes
 	re.log.Debugf(ctx, "Rendering manifest template for resource %s", resource.Name)
 	renderedBytes, err := re.renderToBytes(resource, execCtx)
@@ -148,22 +166,17 @@ func (re *ResourceExecutor) executeResource(
 		return result, NewExecutorError(PhaseResources, resource.Name, "failed to render manifest", err)
 	}
 
-	// Step 4: Extract resource identity from rendered manifest for result reporting
-	var obj unstructured.Unstructured
-	if unmarshalErr := json.Unmarshal(renderedBytes, &obj.Object); unmarshalErr == nil {
-		result.Kind = obj.GetKind()
-		result.Namespace = obj.GetNamespace()
-		result.ResourceName = obj.GetName()
+	// Step 4: If shouldRecreate, delegate to the stateless recreate flow
+	// (delete existing → verify gone → apply new). This is transport-agnostic.
+	if shouldRecreate {
+		return re.executeResourceRecreate(ctx, resource, execCtx, transportTarget, renderedBytes)
 	}
 
-	// Step 5: Prepare apply options
-	var applyOpts *transportclient.ApplyOptions
-	if resource.RecreateOnChange {
-		applyOpts = &transportclient.ApplyOptions{RecreateOnChange: true}
-	}
+	// Step 5: Extract resource identity from rendered manifest for result reporting
+	extractResultIdentity(renderedBytes, &result)
 
 	// Step 6: Call transport client ApplyResource with rendered bytes
-	applyResult, err := transportClient.ApplyResource(ctx, renderedBytes, applyOpts, transportTarget)
+	applyResult, err := transportClient.ApplyResource(ctx, renderedBytes, nil, transportTarget)
 	if err != nil {
 		result.Status = StatusFailed
 		result.Error = err
@@ -186,66 +199,9 @@ func (re *ResourceExecutor) executeResource(
 	re.log.Infof(successCtx, "Resource[%s] processed: operation=%s reason=%s",
 		resource.Name, result.Operation, result.OperationReason)
 
-	// Step 7: Post-apply discovery — find the applied resource and store in execCtx for CEL evaluation
-	if resource.Discovery != nil {
-		discovered, discoverErr := re.discoverResource(ctx, resource, execCtx, transportTarget)
-		if discoverErr != nil {
-			result.Status = StatusFailed
-			result.Error = discoverErr
-			execCtx.Adapter.ExecutionError = &ExecutionError{
-				Phase:   string(PhaseResources),
-				Step:    resource.Name,
-				Message: discoverErr.Error(),
-			}
-			errCtx := logger.WithK8sResult(ctx, "FAILED")
-			errCtx = logger.WithErrorField(errCtx, discoverErr)
-			re.log.Errorf(errCtx, "Resource[%s] discovery after apply failed: %v", resource.Name, discoverErr)
-			return result, NewExecutorError(
-				PhaseResources, resource.Name, "failed to discover resource after apply", discoverErr)
-		}
-		if discovered != nil {
-			// Always store the discovered top-level resource by resource name.
-			// Nested discoveries are added as independent entries keyed by nested name.
-			execCtx.Resources[resource.Name] = discovered
-			re.log.Debugf(ctx, "Resource[%s] discovered and stored in context", resource.Name)
-
-			// Step 8: Nested discoveries — find sub-resources within the discovered parent (e.g., ManifestWork)
-			if len(resource.NestedDiscoveries) > 0 {
-				nestedResults := re.discoverNestedResources(ctx, resource, execCtx, discovered)
-				for nestedName, nestedObj := range nestedResults {
-					if nestedName == resource.Name {
-						re.log.Warnf(ctx,
-							"Nested discovery %q has the same name as parent resource; skipping to avoid overwriting parent",
-							nestedName)
-						continue
-					}
-					if nestedObj == nil {
-						continue
-					}
-					if _, exists := execCtx.Resources[nestedName]; exists {
-						collisionErr := fmt.Errorf(
-							"nested discovery key collision: %q already exists in context",
-							nestedName,
-						)
-						result.Status = StatusFailed
-						result.Error = collisionErr
-						execCtx.Adapter.ExecutionError = &ExecutionError{
-							Phase:   string(PhaseResources),
-							Step:    resource.Name,
-							Message: collisionErr.Error(),
-						}
-						return result, NewExecutorError(
-							PhaseResources, resource.Name,
-							"duplicate resource context key",
-							collisionErr,
-						)
-					}
-					execCtx.Resources[nestedName] = nestedObj
-				}
-				re.log.Debugf(ctx, "Resource[%s] discovered with %d nested resources added to context",
-					resource.Name, len(nestedResults))
-			}
-		}
+	// Step 8: Post-apply discovery — find the applied resource and store in execCtx for CEL evaluation
+	if err := re.runPostApplyDiscovery(ctx, resource, execCtx, transportTarget, &result); err != nil {
+		return result, err
 	}
 
 	return result, nil
@@ -394,10 +350,94 @@ func (re *ResourceExecutor) discoverNestedResources(
 	return nestedResults
 }
 
+// runPostApplyDiscovery discovers the applied resource and its nested sub-resources,
+// storing them in execCtx.Resources for use by post-action CEL expressions.
+// Called after every successful ApplyResource — both from the normal apply path and
+// from the recreate path.
+//
+// On discovery failure: sets result.Status/Error, records the error in adapter metadata
+// (both ExecutionError and ResourceErrors), and returns a non-nil ExecutorError.
+// On success: returns nil (result is unchanged).
+func (re *ResourceExecutor) runPostApplyDiscovery(
+	ctx context.Context,
+	resource configloader.Resource,
+	execCtx *ExecutionContext,
+	transportTarget transportclient.TransportContext,
+	result *ResourceResult,
+) error {
+	if resource.Discovery == nil {
+		return nil
+	}
+
+	discovered, discoverErr := re.discoverResource(ctx, resource, execCtx, transportTarget)
+	if discoverErr != nil {
+		result.Status = StatusFailed
+		result.Error = discoverErr
+		re.recordResourceError(execCtx, resource, discoverErr)
+		errCtx := logger.WithK8sResult(ctx, "FAILED")
+		errCtx = logger.WithErrorField(errCtx, discoverErr)
+		re.log.Errorf(errCtx, "Resource[%s] post-apply discovery failed: %v", resource.Name, discoverErr)
+		return NewExecutorError(PhaseResources, resource.Name, "post-apply discovery failed", discoverErr)
+	}
+
+	if discovered == nil {
+		return nil
+	}
+
+	// Always store the discovered top-level resource by resource name.
+	// Nested discoveries are added as independent entries keyed by nested name.
+	execCtx.Resources[resource.Name] = discovered
+	re.log.Debugf(ctx, "Resource[%s] discovered and stored in context", resource.Name)
+
+	if len(resource.NestedDiscoveries) == 0 {
+		return nil
+	}
+
+	nestedResults := re.discoverNestedResources(ctx, resource, execCtx, discovered)
+	for nestedName, nestedObj := range nestedResults {
+		if nestedName == resource.Name {
+			re.log.Warnf(ctx,
+				"Nested discovery %q has the same name as parent resource; skipping to avoid overwriting parent",
+				nestedName)
+			continue
+		}
+		if nestedObj == nil {
+			continue
+		}
+		if _, exists := execCtx.Resources[nestedName]; exists {
+			collisionErr := fmt.Errorf(
+				"nested discovery key collision: %q already exists in context",
+				nestedName,
+			)
+			result.Status = StatusFailed
+			result.Error = collisionErr
+			re.recordResourceError(execCtx, resource, collisionErr)
+			return NewExecutorError(PhaseResources, resource.Name, "duplicate resource context key", collisionErr)
+		}
+		execCtx.Resources[nestedName] = nestedObj
+	}
+	re.log.Debugf(ctx, "Resource[%s] discovered with %d nested resources added to context",
+		resource.Name, len(nestedResults))
+
+	return nil
+}
+
+// extractResultIdentity populates Kind, Namespace, and ResourceName on result from
+// the rendered manifest bytes. A parse failure is non-fatal — identity fields remain
+// at their zero values and the caller continues normally.
+func extractResultIdentity(renderedBytes []byte, result *ResourceResult) {
+	var obj unstructured.Unstructured
+	if err := json.Unmarshal(renderedBytes, &obj.Object); err == nil {
+		result.Kind = obj.GetKind()
+		result.Namespace = obj.GetNamespace()
+		result.ResourceName = obj.GetName()
+	}
+}
+
 // buildNestedDiscoveryConfig renders templates in a discovery config and returns a manifest.DiscoveryConfig.
 func (re *ResourceExecutor) buildNestedDiscoveryConfig(
 	discovery *configloader.DiscoveryConfig,
-	params map[string]interface{},
+	params map[string]any,
 ) (*manifest.DiscoveryConfig, error) {
 	namespace, err := utils.RenderTemplate(discovery.Namespace, params)
 	if err != nil {
@@ -440,10 +480,10 @@ func (re *ResourceExecutor) buildNestedDiscoveryConfig(
 // resolveGVK extracts the GVK from the resource's manifest.
 // Works for both K8s resources and ManifestWorks since both have apiVersion and kind.
 func (re *ResourceExecutor) resolveGVK(resource configloader.Resource) schema.GroupVersionKind {
-	var manifestData map[string]interface{}
+	var manifestData map[string]any
 
 	switch m := resource.Manifest.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		manifestData = m
 	case string:
 		// String manifests may contain Go template directives ({{ if }}, {{ range }})
@@ -466,10 +506,19 @@ func (re *ResourceExecutor) resolveGVK(resource configloader.Resource) schema.Gr
 	return gv.WithKind(kind)
 }
 
-// hasLifecycleDelete reports whether any resource in the list has lifecycle.delete configured.
-func hasLifecycleDelete(resources []configloader.Resource) bool {
+// hasPreDiscoveryRequirement reports whether any resource requires pre-discovery.
+// Pre-discovery runs before the main resource loop to populate execCtx.Resources
+// with current cluster state, making it available to CEL expressions.
+//
+// Pre-discovery is required for:
+//   - lifecycle.delete.when expressions (to check if resource should be deleted)
+//   - lifecycle.recreate.when expressions (to compare current vs desired state)
+func hasPreDiscoveryRequirement(resources []configloader.Resource) bool {
 	for _, r := range resources {
 		if r.Lifecycle != nil && r.Lifecycle.Delete != nil {
+			return true
+		}
+		if r.Lifecycle != nil && r.Lifecycle.Recreate != nil && r.Lifecycle.Recreate.When != nil {
 			return true
 		}
 	}
@@ -572,6 +621,156 @@ func (re *ResourceExecutor) evaluateLifecycleDeleteWhen(
 	re.log.Debugf(ctx, "Resource[%s] lifecycle.delete.when=%q → matched=%v", resource.Name, expression, celResult.Matched)
 
 	return celResult.Matched, nil
+}
+
+// evaluateLifecycleRecreateWhen evaluates the lifecycle.recreate.when CEL expression
+// and returns true if the resource should be recreated (delete + create).
+//
+// The evaluation uses the same CEL context as other conditional expressions:
+// params + adapter metadata + resources. This allows comparing incoming parameters
+// with discovered resource state to detect changes that require recreation.
+//
+// If when is nil or expression is not set, returns false (no recreation).
+func (re *ResourceExecutor) evaluateLifecycleRecreateWhen(
+	ctx context.Context,
+	resource configloader.Resource,
+	execCtx *ExecutionContext,
+) (bool, error) {
+	if resource.Lifecycle == nil || resource.Lifecycle.Recreate == nil || resource.Lifecycle.Recreate.When == nil {
+		return false, nil
+	}
+	if resource.Lifecycle.Recreate.When.Expression == "" {
+		return false, fmt.Errorf("resource %q has lifecycle.recreate.when configured but expression is empty", resource.Name)
+	}
+	expression := resource.Lifecycle.Recreate.When.Expression
+
+	evalCtx := criteria.NewEvaluationContext()
+	evalCtx.SetVariablesFromMap(execCtx.GetCELVariables())
+
+	evaluator, err := criteria.NewEvaluator(ctx, evalCtx, re.log)
+	if err != nil {
+		return false, fmt.Errorf("failed to create CEL evaluator: %w", err)
+	}
+
+	celResult, err := evaluator.EvaluateCEL(expression)
+	if err != nil {
+		return false, fmt.Errorf("lifecycle.recreate.when expression %q failed to evaluate "+
+			"(check that all variables exist and field paths are correct): %w", expression, err)
+	}
+
+	execCtx.AddCELEvaluation(PhaseResources, resource.Name+"/lifecycle.recreate.when", expression, celResult.Matched)
+	re.log.Debugf(ctx, "Resource[%s] lifecycle.recreate.when=%q → matched=%v", resource.Name, expression, celResult.Matched)
+
+	return celResult.Matched, nil
+}
+
+// executeResourceRecreate handles the recreate path: delete the existing resource, then
+// create the new one. This is transport-agnostic and stateless — safe to call repeatedly
+// across reconciliation loops.
+//
+// The flow mirrors executeResourceDelete for the delete phase:
+//   - If the resource is not found (pre-delete): skip delete, go straight to apply.
+//   - If the resource is found: send delete request, then rediscover:
+//   - Post-delete NotFound: resource is gone → apply the new manifest.
+//   - Post-delete still present: finalizers or async deletion in progress →
+//     return early. The next reconciliation will retry.
+func (re *ResourceExecutor) executeResourceRecreate(
+	ctx context.Context,
+	resource configloader.Resource,
+	execCtx *ExecutionContext,
+	transportTarget transportclient.TransportContext,
+	renderedBytes []byte,
+) (ResourceResult, error) {
+	result := ResourceResult{
+		Name:      resource.Name,
+		Status:    StatusSuccess,
+		Operation: manifest.OperationRecreate,
+	}
+
+	// Extract identity from rendered manifest for result reporting and GVK resolution.
+	extractResultIdentity(renderedBytes, &result)
+
+	gvk := re.resolveGVK(resource)
+
+	// Step 1: Discover existing resource for deletion.
+	discovered, discoverErr := re.discoverResource(ctx, resource, execCtx, transportTarget)
+	isNotFound := discoverErr != nil && apierrors.IsNotFound(discoverErr)
+	if discoverErr != nil && !isNotFound {
+		result.Status = StatusFailed
+		result.Error = discoverErr
+		re.recordResourceError(execCtx, resource, discoverErr)
+		return result, NewExecutorError(
+			PhaseResources, resource.Name, "failed to discover resource for recreation", discoverErr)
+	}
+
+	// Step 2: Delete the existing resource (skip if not found).
+	if discovered != nil && !isNotFound {
+		// Use identity from discovered resource (more reliable than rendered manifest).
+		deleteGVK := discovered.GroupVersionKind()
+		if deleteGVK.Kind != "" {
+			gvk = deleteGVK
+		}
+
+		deleteOpts := &transportclient.DeleteOptions{PropagationPolicy: "Background"}
+		if err := re.client.DeleteResource(
+			ctx, gvk, discovered.GetNamespace(), discovered.GetName(), deleteOpts, transportTarget,
+		); err != nil {
+			result.Status = StatusFailed
+			result.Error = err
+			re.recordResourceError(execCtx, resource, err)
+			return result, NewExecutorError(
+				PhaseResources, resource.Name, "failed to delete resource for recreation", err)
+		}
+
+		// Step 3: Post-delete discovery — check if the resource is truly gone.
+		postDeleted, postErr := re.discoverResource(ctx, resource, execCtx, transportTarget)
+		postIsNotFound := postErr != nil && apierrors.IsNotFound(postErr)
+		switch {
+		case postErr != nil && !postIsNotFound:
+			// Discovery error (non-fatal): assume resource still present, return early.
+			re.log.Debugf(ctx, "Resource[%s] recreate: post-delete discovery error (non-fatal): %v",
+				resource.Name, postErr)
+			execCtx.Resources[resource.Name] = discovered
+			result.OperationReason = "deletion pending, will complete on next reconciliation"
+			return result, nil
+
+		case postDeleted != nil && !postIsNotFound:
+			// Resource still present (finalizers or async deletion): return early.
+			execCtx.Resources[resource.Name] = postDeleted
+			result.OperationReason = "deletion pending, will complete on next reconciliation"
+			re.log.Infof(ctx,
+				"Resource[%s] recreate: resource still present after delete, deferring create",
+				resource.Name)
+			return result, nil
+		}
+
+		// Resource is confirmed gone — proceed to create.
+		re.log.Debugf(ctx, "Resource[%s] recreate: old resource confirmed deleted, creating new", resource.Name)
+	} else {
+		re.log.Debugf(ctx, "Resource[%s] recreate: resource does not exist, creating directly", resource.Name)
+	}
+
+	// Step 4: Apply the new resource (transport sees a fresh create).
+	applyResult, err := re.client.ApplyResource(ctx, renderedBytes, nil, transportTarget)
+	if err != nil {
+		result.Status = StatusFailed
+		result.Error = err
+		re.recordResourceError(execCtx, resource, err)
+		return result, NewExecutorError(
+			PhaseResources, resource.Name, "failed to apply resource after recreation delete", err)
+	}
+
+	result.OperationReason = fmt.Sprintf("recreated: %s", applyResult.Reason)
+	re.log.Infof(logger.WithK8sResult(ctx, "SUCCESS"),
+		"Resource[%s] recreated: apply_operation=%s reason=%s",
+		resource.Name, applyResult.Operation, applyResult.Reason)
+
+	// Step 5: Post-apply discovery + nested discoveries.
+	if err := re.runPostApplyDiscovery(ctx, resource, execCtx, transportTarget, &result); err != nil {
+		return result, err
+	}
+
+	return result, nil
 }
 
 // executeResourceDelete handles the delete path for a resource with lifecycle.delete configured.
@@ -727,7 +926,7 @@ func (re *ResourceExecutor) recordResourceError(execCtx *ExecutionContext, resou
 }
 
 // GetResourceAsMap converts an unstructured resource to a map for CEL evaluation
-func GetResourceAsMap(resource *unstructured.Unstructured) map[string]interface{} {
+func GetResourceAsMap(resource *unstructured.Unstructured) map[string]any {
 	if resource == nil {
 		return nil
 	}

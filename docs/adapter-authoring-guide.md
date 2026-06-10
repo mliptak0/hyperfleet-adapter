@@ -508,7 +508,7 @@ The framework determines the operation automatically:
 | `create` | Resource doesn't exist | Apply the manifest |
 | `update` | Resource exists, generation changed | Patch the resource |
 | `skip` | Resource exists, generation unchanged | No-op (idempotent) |
-| `recreate` | `recreate_on_change: true` is set | Delete then create |
+| `recreate` | `lifecycle.recreate.when` expression evaluates to `true` | Delete then create |
 | `delete` | `lifecycle.delete.when` expression evaluates to `true` | Delete the resource; remaining resources still processed |
 
 ### Discovery

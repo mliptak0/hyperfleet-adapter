@@ -44,10 +44,10 @@ func TestResourceExecutor_ExecuteAll_DiscoveryFailure(t *testing.T) {
 	resource := configloader.Resource{
 		Name:      "test-resource",
 		Transport: &configloader.TransportConfig{Client: "kubernetes"},
-		Manifest: map[string]interface{}{
+		Manifest: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "ConfigMap",
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name":      "test-cm",
 				"namespace": "default",
 			},
@@ -58,7 +58,7 @@ func TestResourceExecutor_ExecuteAll_DiscoveryFailure(t *testing.T) {
 		},
 	}
 	resources := []configloader.Resource{resource}
-	execCtx := NewExecutionContext(context.Background(), map[string]interface{}{}, nil)
+	execCtx := NewExecutionContext(context.Background(), map[string]any{}, nil)
 
 	results, err := re.ExecuteAll(context.Background(), resources, execCtx)
 
@@ -80,53 +80,53 @@ func TestResourceExecutor_ExecuteAll_StoresNestedDiscoveriesByName(t *testing.T)
 		Reason:    "mock",
 	}
 	mock.GetResourceResult = &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "work.open-cluster-management.io/v1",
 			"kind":       "ManifestWork",
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name":      "cluster-1-adapter2",
 				"namespace": "default",
 			},
-			"spec": map[string]interface{}{
-				"workload": map[string]interface{}{
-					"manifests": []interface{}{
-						map[string]interface{}{
+			"spec": map[string]any{
+				"workload": map[string]any{
+					"manifests": []any{
+						map[string]any{
 							"apiVersion": "v1",
 							"kind":       "ConfigMap",
-							"metadata": map[string]interface{}{
+							"metadata": map[string]any{
 								"name":      "cluster-1-adapter2-configmap",
 								"namespace": "default",
 							},
-							"data": map[string]interface{}{
+							"data": map[string]any{
 								"cluster_id": "cluster-1",
 							},
 						},
 					},
 				},
 			},
-			"status": map[string]interface{}{
-				"resourceStatus": map[string]interface{}{
-					"manifests": []interface{}{
-						map[string]interface{}{
-							"resourceMeta": map[string]interface{}{
+			"status": map[string]any{
+				"resourceStatus": map[string]any{
+					"manifests": []any{
+						map[string]any{
+							"resourceMeta": map[string]any{
 								"name":      "cluster-1-adapter2-configmap",
 								"namespace": "default",
 								"resource":  "configmaps",
 								"group":     "",
 							},
-							"statusFeedback": map[string]interface{}{
-								"values": []interface{}{
-									map[string]interface{}{
+							"statusFeedback": map[string]any{
+								"values": []any{
+									map[string]any{
 										"name": "data",
-										"fieldValue": map[string]interface{}{
+										"fieldValue": map[string]any{
 											"type":    "JsonRaw",
 											"jsonRaw": "{\"cluster_id\":\"cluster-1\"}",
 										},
 									},
 								},
 							},
-							"conditions": []interface{}{
-								map[string]interface{}{
+							"conditions": []any{
+								map[string]any{
 									"type":   "Applied",
 									"status": "True",
 								},
@@ -148,10 +148,10 @@ func TestResourceExecutor_ExecuteAll_StoresNestedDiscoveriesByName(t *testing.T)
 		Transport: &configloader.TransportConfig{
 			Client: "kubernetes",
 		},
-		Manifest: map[string]interface{}{
+		Manifest: map[string]any{
 			"apiVersion": "work.open-cluster-management.io/v1",
 			"kind":       "ManifestWork",
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name":      "cluster-1-adapter2",
 				"namespace": "default",
 			},
@@ -171,7 +171,7 @@ func TestResourceExecutor_ExecuteAll_StoresNestedDiscoveriesByName(t *testing.T)
 		},
 	}
 
-	execCtx := NewExecutionContext(context.Background(), map[string]interface{}{}, nil)
+	execCtx := NewExecutionContext(context.Background(), map[string]any{}, nil)
 	results, err := re.ExecuteAll(context.Background(), []configloader.Resource{resource}, execCtx)
 	require.NoError(t, err)
 	require.Len(t, results, 1)
@@ -193,10 +193,10 @@ func TestResourceExecutor_ExecuteAll_StoresNestedDiscoveriesByName(t *testing.T)
 	_, hasConds := nested.Object["conditions"]
 	assert.True(t, hasConds, "configmap0 should have conditions merged from parent")
 
-	sf := nested.Object["statusFeedback"].(map[string]interface{})
-	values := sf["values"].([]interface{})
+	sf := nested.Object["statusFeedback"].(map[string]any)
+	values := sf["values"].([]any)
 	assert.Len(t, values, 1)
-	v0 := values[0].(map[string]interface{})
+	v0 := values[0].(map[string]any)
 	assert.Equal(t, "data", v0["name"])
 }
 
@@ -208,7 +208,7 @@ func TestRenderToBytes_StringManifest(t *testing.T) {
 	tests := []struct {
 		name         string
 		manifest     string
-		params       map[string]interface{}
+		params       map[string]any
 		wantContains []string
 		wantErr      bool
 	}{
@@ -221,7 +221,7 @@ metadata:
   namespace: "{{ .namespace }}"
 data:
   key: value`,
-			params: map[string]interface{}{
+			params: map[string]any{
 				"name":      "my-config",
 				"namespace": "default",
 			},
@@ -239,7 +239,7 @@ metadata:
 {{ end }}
 data:
   key: value`,
-			params: map[string]interface{}{
+			params: map[string]any{
 				"addLabels": true,
 			},
 			wantContains: []string{`"labels"`, `"app":"myapp"`},
@@ -256,7 +256,7 @@ metadata:
 {{ end }}
 data:
   key: value`,
-			params: map[string]interface{}{
+			params: map[string]any{
 				"addLabels": false,
 			},
 			wantContains: []string{`"name":"test"`, `"key":"value"`},
@@ -271,8 +271,8 @@ data:
 {{ range $k, $v := .items }}
   {{ $k }}: "{{ $v }}"
 {{ end }}`,
-			params: map[string]interface{}{
-				"items": map[string]interface{}{
+			params: map[string]any{
+				"items": map[string]any{
 					"key1": "val1",
 					"key2": "val2",
 				},
@@ -291,7 +291,7 @@ metadata:
 {{ else }}
     status: "bad"
 {{ end }}`,
-			params: map[string]interface{}{
+			params: map[string]any{
 				"isGood": true,
 			},
 			wantContains: []string{`"status":"good"`},
@@ -299,7 +299,7 @@ metadata:
 		{
 			name:     "invalid template syntax",
 			manifest: `apiVersion: v1{{ if }}`,
-			params:   map[string]interface{}{},
+			params:   map[string]any{},
 			wantErr:  true,
 		},
 	}
@@ -342,8 +342,8 @@ data:
     - id: {{ . }}
 {{ end }}`
 
-	params := map[string]interface{}{
-		"subnetIds": []interface{}{"sub1", "sub2", "sub3"},
+	params := map[string]any{
+		"subnetIds": []any{"sub1", "sub2", "sub3"},
 	}
 
 	resource := configloader.Resource{
@@ -378,7 +378,7 @@ data:
 			Manifest: manifest,
 		}
 		execCtx := NewExecutionContext(context.Background(), nil, nil)
-		execCtx.Params = map[string]interface{}{}
+		execCtx.Params = map[string]any{}
 
 		data, err := re.renderToBytes(resource, execCtx)
 		require.NoError(t, err)
@@ -392,7 +392,7 @@ data:
 			Manifest: "",
 		}
 		execCtx := NewExecutionContext(context.Background(), nil, nil)
-		execCtx.Params = map[string]interface{}{}
+		execCtx.Params = map[string]any{}
 
 		_, err := re.renderToBytes(resource, execCtx)
 		require.Error(t, err)
@@ -406,7 +406,7 @@ data:
 			Manifest: manifest,
 		}
 		execCtx := NewExecutionContext(context.Background(), nil, nil)
-		execCtx.Params = map[string]interface{}{
+		execCtx.Params = map[string]any{
 			"content": "not: valid: yaml: [broken",
 		}
 
@@ -425,7 +425,7 @@ metadata:
 			Manifest: manifest,
 		}
 		execCtx := NewExecutionContext(context.Background(), nil, nil)
-		execCtx.Params = map[string]interface{}{} // missingVar not provided
+		execCtx.Params = map[string]any{} // missingVar not provided
 
 		_, err := re.renderToBytes(resource, execCtx)
 		require.Error(t, err)
@@ -447,17 +447,17 @@ metadata:
 	t.Run("map manifest still works (backward compatibility)", func(t *testing.T) {
 		resource := configloader.Resource{
 			Name: "test",
-			Manifest: map[string]interface{}{
+			Manifest: map[string]any{
 				"apiVersion": "v1",
 				"kind":       "ConfigMap",
-				"metadata": map[string]interface{}{
+				"metadata": map[string]any{
 					"name":      "{{ .name }}",
 					"namespace": "default",
 				},
 			},
 		}
 		execCtx := NewExecutionContext(context.Background(), nil, nil)
-		execCtx.Params = map[string]interface{}{
+		execCtx.Params = map[string]any{
 			"name": "rendered-name",
 		}
 
@@ -473,10 +473,10 @@ func TestResourceExecutor_ExecuteAll_StringManifest(t *testing.T) {
 	mock := k8sclient.NewMockK8sClient()
 	// Don't set ApplyResourceResult — use default behavior which parses and stores the resource
 	mock.GetResourceResult = &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "ConfigMap",
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name":      "test-config",
 				"namespace": "default",
 			},
@@ -511,7 +511,7 @@ data:
 	}
 
 	execCtx := NewExecutionContext(context.Background(), nil, nil)
-	execCtx.Params = map[string]interface{}{
+	execCtx.Params = map[string]any{
 		"configName": "test-config",
 		"namespace":  "default",
 		"addLabels":  true,
@@ -546,7 +546,7 @@ func TestResolveGVK_StringManifest(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		manifest    interface{}
+		manifest    any
 		wantGroup   string
 		wantVersion string
 		wantKind    string
@@ -554,7 +554,7 @@ func TestResolveGVK_StringManifest(t *testing.T) {
 	}{
 		{
 			name: "map manifest",
-			manifest: map[string]interface{}{
+			manifest: map[string]any{
 				"apiVersion": "v1",
 				"kind":       "ConfigMap",
 			},
@@ -623,10 +623,10 @@ func newResourceWithLifecycle(expression, propagationPolicy string) configloader
 	r := configloader.Resource{
 		Name:      "test-resource",
 		Transport: &configloader.TransportConfig{Client: "kubernetes"},
-		Manifest: map[string]interface{}{
+		Manifest: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "ConfigMap",
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name":      "test-cm",
 				"namespace": "default",
 			},
@@ -709,10 +709,10 @@ func TestResourceExecutor_LifecycleDelete_WhenTrue_ResourceFound_InstantDelete(t
 	// (no finalizers — resource is instantly gone after delete API call).
 	// Expected: nil stored → dependent resources can cascade in the same reconciliation.
 	discovered := &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "ConfigMap",
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name":      "test-cm",
 				"namespace": "default",
 			},
@@ -752,10 +752,10 @@ func TestResourceExecutor_LifecycleDelete_WhenTrue_ResourceFound_WithFinalizers(
 	// (finalizers are running, or Maestro deletion is async).
 	// Expected: discovered object stored (non-nil) → dependent resources wait for next reconciliation.
 	discovered := &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "ConfigMap",
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name":      "test-cm",
 				"namespace": "default",
 			},
@@ -837,10 +837,10 @@ func TestResourceExecutor_LifecycleDelete_WhenFalse_NormalApply(t *testing.T) {
 	resource := newResourceWithLifecycle("deleted_time != null", "Background")
 
 	// Set up GetResource result for post-apply discovery (resource uses ByName discovery → GetResource)
-	mock.GetResourceResult = &unstructured.Unstructured{Object: map[string]interface{}{
+	mock.GetResourceResult = &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "v1",
 		"kind":       "ConfigMap",
-		"metadata":   map[string]interface{}{"name": "test-cm", "namespace": "default"},
+		"metadata":   map[string]any{"name": "test-cm", "namespace": "default"},
 	}}
 
 	execCtx := NewExecutionContext(context.Background(), nil, nil)
@@ -870,10 +870,10 @@ func TestResourceExecutor_LifecycleDelete_NoLifecycle_NormalApply(t *testing.T) 
 	resource := configloader.Resource{
 		Name:      "test-resource",
 		Transport: &configloader.TransportConfig{Client: "kubernetes"},
-		Manifest: map[string]interface{}{
+		Manifest: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "ConfigMap",
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name":      "test-cm",
 				"namespace": "default",
 			},
@@ -915,17 +915,17 @@ func TestResourceExecutor_LifecycleDelete_OrderingViaResources_InstantDelete(t *
 	// clusterJob is deleted; post-delete rediscovery returns NotFound (instant delete).
 	// clusterConfigMap sees resources.clusterJob == null in the SAME reconciliation → also deletes.
 	jobResource := &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "batch/v1",
 			"kind":       "Job",
-			"metadata":   map[string]interface{}{"name": "my-job", "namespace": "default"},
+			"metadata":   map[string]any{"name": "my-job", "namespace": "default"},
 		},
 	}
 	configMapResource := &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "ConfigMap",
-			"metadata":   map[string]interface{}{"name": "my-cm", "namespace": "default"},
+			"metadata":   map[string]any{"name": "my-cm", "namespace": "default"},
 		},
 	}
 
@@ -942,10 +942,10 @@ func TestResourceExecutor_LifecycleDelete_OrderingViaResources_InstantDelete(t *
 	clusterJob := configloader.Resource{
 		Name:      "clusterJob",
 		Transport: &configloader.TransportConfig{Client: "kubernetes"},
-		Manifest: map[string]interface{}{
+		Manifest: map[string]any{
 			"apiVersion": "batch/v1",
 			"kind":       "Job",
-			"metadata":   map[string]interface{}{"name": "my-job", "namespace": "default"},
+			"metadata":   map[string]any{"name": "my-job", "namespace": "default"},
 		},
 		Discovery: &configloader.DiscoveryConfig{Namespace: "default", ByName: "my-job"},
 		Lifecycle: &configloader.ResourceLifecycle{
@@ -959,10 +959,10 @@ func TestResourceExecutor_LifecycleDelete_OrderingViaResources_InstantDelete(t *
 	clusterConfigMap := configloader.Resource{
 		Name:      "clusterConfigMap",
 		Transport: &configloader.TransportConfig{Client: "kubernetes"},
-		Manifest: map[string]interface{}{
+		Manifest: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "ConfigMap",
-			"metadata":   map[string]interface{}{"name": "my-cm", "namespace": "default"},
+			"metadata":   map[string]any{"name": "my-cm", "namespace": "default"},
 		},
 		Discovery: &configloader.DiscoveryConfig{Namespace: "default", ByName: "my-cm"},
 		Lifecycle: &configloader.ResourceLifecycle{
@@ -999,10 +999,10 @@ func TestResourceExecutor_LifecycleDelete_OrderingViaResources_WithFinalizers(t 
 	// clusterJob is deleted; post-delete rediscovery still returns the resource (finalizers running).
 	// clusterConfigMap sees resources.clusterJob != null → waits for next reconciliation.
 	jobResource := &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "batch/v1",
 			"kind":       "Job",
-			"metadata":   map[string]interface{}{"name": "my-job", "namespace": "default"},
+			"metadata":   map[string]any{"name": "my-job", "namespace": "default"},
 		},
 	}
 
@@ -1019,10 +1019,10 @@ func TestResourceExecutor_LifecycleDelete_OrderingViaResources_WithFinalizers(t 
 	clusterJob := configloader.Resource{
 		Name:      "clusterJob",
 		Transport: &configloader.TransportConfig{Client: "kubernetes"},
-		Manifest: map[string]interface{}{
+		Manifest: map[string]any{
 			"apiVersion": "batch/v1",
 			"kind":       "Job",
-			"metadata":   map[string]interface{}{"name": "my-job", "namespace": "default"},
+			"metadata":   map[string]any{"name": "my-job", "namespace": "default"},
 		},
 		Discovery: &configloader.DiscoveryConfig{Namespace: "default", ByName: "my-job"},
 		Lifecycle: &configloader.ResourceLifecycle{
@@ -1036,10 +1036,10 @@ func TestResourceExecutor_LifecycleDelete_OrderingViaResources_WithFinalizers(t 
 	clusterConfigMap := configloader.Resource{
 		Name:      "clusterConfigMap",
 		Transport: &configloader.TransportConfig{Client: "kubernetes"},
-		Manifest: map[string]interface{}{
+		Manifest: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "ConfigMap",
-			"metadata":   map[string]interface{}{"name": "my-cm", "namespace": "default"},
+			"metadata":   map[string]any{"name": "my-cm", "namespace": "default"},
 		},
 		Discovery: &configloader.DiscoveryConfig{Namespace: "default", ByName: "my-cm"},
 		Lifecycle: &configloader.ResourceLifecycle{
@@ -1075,10 +1075,10 @@ func TestResourceExecutor_LifecycleDelete_OrderingSecondReconciliation(t *testin
 	// clusterConfigMap sees resources.clusterJob == null → deletes
 	// Job returns NotFound; ConfigMap returns a found resource
 	configMapResource := &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "ConfigMap",
-			"metadata":   map[string]interface{}{"name": "my-cm", "namespace": "default"},
+			"metadata":   map[string]any{"name": "my-cm", "namespace": "default"},
 		},
 	}
 
@@ -1094,10 +1094,10 @@ func TestResourceExecutor_LifecycleDelete_OrderingSecondReconciliation(t *testin
 	clusterJob := configloader.Resource{
 		Name:      "clusterJob",
 		Transport: &configloader.TransportConfig{Client: "kubernetes"},
-		Manifest: map[string]interface{}{
+		Manifest: map[string]any{
 			"apiVersion": "batch/v1",
 			"kind":       "Job",
-			"metadata":   map[string]interface{}{"name": "my-job", "namespace": "default"},
+			"metadata":   map[string]any{"name": "my-job", "namespace": "default"},
 		},
 		Discovery: &configloader.DiscoveryConfig{Namespace: "default", ByName: "my-job"},
 		Lifecycle: &configloader.ResourceLifecycle{
@@ -1109,10 +1109,10 @@ func TestResourceExecutor_LifecycleDelete_OrderingSecondReconciliation(t *testin
 	clusterConfigMap := configloader.Resource{
 		Name:      "clusterConfigMap",
 		Transport: &configloader.TransportConfig{Client: "kubernetes"},
-		Manifest: map[string]interface{}{
+		Manifest: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "ConfigMap",
-			"metadata":   map[string]interface{}{"name": "my-cm", "namespace": "default"},
+			"metadata":   map[string]any{"name": "my-cm", "namespace": "default"},
 		},
 		Discovery: &configloader.DiscoveryConfig{Namespace: "default", ByName: "my-cm"},
 		Lifecycle: &configloader.ResourceLifecycle{
@@ -1145,10 +1145,10 @@ func TestResourceExecutor_LifecycleDelete_OrderingSecondReconciliation(t *testin
 func TestResourceExecutor_LifecycleDelete_DeleteError(t *testing.T) {
 	// Delete call fails → result is failed, ExecutionError is set
 	discovered := &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "ConfigMap",
-			"metadata":   map[string]interface{}{"name": "test-cm", "namespace": "default"},
+			"metadata":   map[string]any{"name": "test-cm", "namespace": "default"},
 		},
 	}
 	deleteErr := errors.New("RBAC denied")
@@ -1271,10 +1271,10 @@ func TestResourceExecutor_LifecycleDelete_PropagationPolicy(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			discovered := &unstructured.Unstructured{
-				Object: map[string]interface{}{
+				Object: map[string]any{
 					"apiVersion": "v1",
 					"kind":       "ConfigMap",
-					"metadata":   map[string]interface{}{"name": "test-cm", "namespace": "default"},
+					"metadata":   map[string]any{"name": "test-cm", "namespace": "default"},
 				},
 			}
 			mock := &trackingMockClient{MockK8sClient: k8sclient.NewMockK8sClient()}
@@ -1312,10 +1312,10 @@ func TestResourceExecutor_LifecycleDelete_PreDeleteDiscoveryError(t *testing.T) 
 	// Expected: result is failed, ExecutionError is populated, DeleteResource is not called.
 	transientErr := errors.New("connection timeout: context deadline exceeded")
 	existingCM := &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "ConfigMap",
-			"metadata":   map[string]interface{}{"name": "test-cm", "namespace": "default"},
+			"metadata":   map[string]any{"name": "test-cm", "namespace": "default"},
 		},
 	}
 	mock := &firstCallResultMock{
@@ -1365,10 +1365,10 @@ func TestResourceExecutor_LifecycleDelete_DeleteConfigNil(t *testing.T) {
 	resource := configloader.Resource{
 		Name:      "test-resource",
 		Transport: &configloader.TransportConfig{Client: "kubernetes"},
-		Manifest: map[string]interface{}{
+		Manifest: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "ConfigMap",
-			"metadata":   map[string]interface{}{"name": "test-cm", "namespace": "default"},
+			"metadata":   map[string]any{"name": "test-cm", "namespace": "default"},
 		},
 		Discovery: &configloader.DiscoveryConfig{Namespace: "default", ByName: "test-cm"},
 		Lifecycle: &configloader.ResourceLifecycle{
@@ -1394,10 +1394,10 @@ func TestResourceExecutor_LifecycleDelete_Maestro_AsyncDeletion(t *testing.T) {
 	// Maestro deletion is async: the resource stays discoverable (deletionTimestamp set, not removed).
 	// Post-delete rediscovery still finds the resource → stored as non-nil → dependents wait.
 	discovered := &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "work.open-cluster-management.io/v1",
 			"kind":       "ManifestWork",
-			"metadata":   map[string]interface{}{"name": "cluster-1-work", "namespace": "cluster-1"},
+			"metadata":   map[string]any{"name": "cluster-1-work", "namespace": "cluster-1"},
 		},
 	}
 
@@ -1416,10 +1416,10 @@ func TestResourceExecutor_LifecycleDelete_Maestro_AsyncDeletion(t *testing.T) {
 			Client:  "maestro",
 			Maestro: &configloader.MaestroTransportConfig{TargetCluster: "cluster-1"},
 		},
-		Manifest: map[string]interface{}{
+		Manifest: map[string]any{
 			"apiVersion": "work.open-cluster-management.io/v1",
 			"kind":       "ManifestWork",
-			"metadata":   map[string]interface{}{"name": "cluster-1-work", "namespace": "cluster-1"},
+			"metadata":   map[string]any{"name": "cluster-1-work", "namespace": "cluster-1"},
 		},
 		Discovery: &configloader.DiscoveryConfig{Namespace: "cluster-1", ByName: "cluster-1-work"},
 		Lifecycle: &configloader.ResourceLifecycle{
@@ -1487,10 +1487,10 @@ func TestResourceExecutor_ExecuteAll_ContinuesAfterDeleteFailure(t *testing.T) {
 	// If resource A's delete fails, resource B must still be attempted.
 	makeObj := func(name string) *unstructured.Unstructured {
 		return &unstructured.Unstructured{
-			Object: map[string]interface{}{
+			Object: map[string]any{
 				"apiVersion": "v1",
 				"kind":       "ConfigMap",
-				"metadata":   map[string]interface{}{"name": name, "namespace": "default"},
+				"metadata":   map[string]any{"name": name, "namespace": "default"},
 			},
 		}
 	}
@@ -1584,11 +1584,11 @@ func TestResourceExecutor_GetCELVariables_DeletedResourceAbsent(t *testing.T) {
 	execCtx := NewExecutionContext(context.Background(), nil, nil)
 	execCtx.Resources["clusterJob"] = nil // explicitly stored nil (deleted resource)
 	execCtx.Resources["clusterConfigMap"] = &unstructured.Unstructured{
-		Object: map[string]interface{}{"kind": "ConfigMap"},
+		Object: map[string]any{"kind": "ConfigMap"},
 	}
 
 	vars := execCtx.GetCELVariables()
-	resources, ok := vars["resources"].(map[string]interface{})
+	resources, ok := vars["resources"].(map[string]any)
 	require.True(t, ok)
 
 	// nil-sentinel resource must NOT be in the CEL resources map;
@@ -1646,10 +1646,10 @@ func (m *selectorTrackingMockClient) DeleteResource(
 // resource returned by GetLatestGenerationFromList is the one that gets deleted.
 func TestResourceExecutor_LifecycleDelete_BySelectors(t *testing.T) {
 	discovered := &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "ConfigMap",
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name":      "my-cm",
 				"namespace": "default",
 			},
@@ -1669,10 +1669,10 @@ func TestResourceExecutor_LifecycleDelete_BySelectors(t *testing.T) {
 	resource := configloader.Resource{
 		Name:      "test-resource",
 		Transport: &configloader.TransportConfig{Client: "kubernetes"},
-		Manifest: map[string]interface{}{
+		Manifest: map[string]any{
 			"apiVersion": "v1",
 			"kind":       "ConfigMap",
-			"metadata":   map[string]interface{}{"name": "my-cm", "namespace": "default"},
+			"metadata":   map[string]any{"name": "my-cm", "namespace": "default"},
 		},
 		Discovery: &configloader.DiscoveryConfig{
 			Namespace: "default",
@@ -1702,4 +1702,394 @@ func TestResourceExecutor_LifecycleDelete_BySelectors(t *testing.T) {
 	storedVal, exists := execCtx.Resources[resource.Name]
 	assert.True(t, exists, "nil sentinel should be in execCtx.Resources")
 	assert.Nil(t, storedVal, "nil stored when post-delete discovery finds no resources")
+}
+
+// =============================================================================
+// lifecycle.recreate.when tests
+// =============================================================================
+
+// recreateMock tracks DeleteResource and ApplyResource calls and controls GetResource
+// responses via an ordered sequence of results for each call.
+type recreateMock struct {
+	*k8sclient.MockK8sClient
+	getResults   []getResult
+	getCallCount int
+	deleteCalled bool
+	applyCalled  bool
+}
+
+type getResult struct {
+	obj *unstructured.Unstructured
+	err error
+}
+
+func (m *recreateMock) GetResource(
+	_ context.Context,
+	_ schema.GroupVersionKind,
+	_, _ string,
+	_ transportclient.TransportContext,
+) (*unstructured.Unstructured, error) {
+	idx := m.getCallCount
+	m.getCallCount++
+	if idx < len(m.getResults) {
+		return m.getResults[idx].obj, m.getResults[idx].err
+	}
+	return m.GetResourceResult, m.GetResourceError
+}
+
+func (m *recreateMock) DeleteResource(
+	_ context.Context,
+	_ schema.GroupVersionKind,
+	_, _ string,
+	_ *transportclient.DeleteOptions,
+	_ transportclient.TransportContext,
+) error {
+	m.deleteCalled = true
+	return m.DeleteResourceError
+}
+
+func (m *recreateMock) ApplyResource(
+	ctx context.Context,
+	manifestBytes []byte,
+	opts *transportclient.ApplyOptions,
+	target transportclient.TransportContext,
+) (*transportclient.ApplyResult, error) {
+	m.applyCalled = true
+	return m.MockK8sClient.ApplyResource(ctx, manifestBytes, opts, target)
+}
+
+var testConfigMap = &unstructured.Unstructured{Object: map[string]any{
+	"apiVersion": "v1",
+	"kind":       "ConfigMap",
+	"metadata":   map[string]any{"name": "test-cm", "namespace": "default"},
+	"data":       map[string]any{"baseDomain": "old.example.com"},
+}}
+
+var (
+	testNotFoundErr   = apierrors.NewNotFound(schema.GroupResource{Resource: "configmaps"}, "test-cm")
+	testNewBaseDomain = "new.example.com"
+)
+
+func newResourceWithLifecycleRecreate(expression string) configloader.Resource {
+	return configloader.Resource{
+		Name:      "test_resource",
+		Transport: &configloader.TransportConfig{Client: "kubernetes"},
+		Manifest: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata": map[string]any{
+				"name":      "test-cm",
+				"namespace": "default",
+			},
+		},
+		Discovery: &configloader.DiscoveryConfig{ByName: "test-cm", Namespace: "default"},
+		Lifecycle: &configloader.ResourceLifecycle{
+			Recreate: &configloader.LifecycleRecreate{
+				When: &configloader.LifecycleWhen{Expression: expression},
+			},
+		},
+	}
+}
+
+func TestResourceExecutor_LifecycleRecreate_HappyPath_DeleteThenCreate(t *testing.T) {
+	// CEL=true, delete succeeds, resource gone after delete → create succeeds.
+	// GetResource calls: 1=pre-discovery(found), 2=pre-delete discovery(found),
+	// 3=post-delete discovery(404), 4=post-apply discovery(new resource)
+	newCM := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata":   map[string]any{"name": "test-cm", "namespace": "default"},
+		"data":       map[string]any{"baseDomain": testNewBaseDomain},
+	}}
+
+	baseMock := k8sclient.NewMockK8sClient()
+	baseMock.ApplyResourceResult = &transportclient.ApplyResult{
+		Operation: manifest.OperationCreate,
+		Reason:    "resource not found",
+	}
+	mock := &recreateMock{
+		MockK8sClient: baseMock,
+		getResults: []getResult{
+			{obj: testConfigMap, err: nil},   // pre-discovery
+			{obj: testConfigMap, err: nil},   // executeResourceRecreate: discover for delete
+			{obj: nil, err: testNotFoundErr}, // post-delete discovery: gone
+			{obj: newCM, err: nil},           // post-apply discovery
+		},
+	}
+
+	re := newResourceExecutor(&ExecutorConfig{
+		TransportClient: mock,
+		Logger:          logger.NewTestLogger(),
+	})
+
+	resource := newResourceWithLifecycleRecreate(
+		`resources.?test_resource.hasValue() && baseDomain != resources.test_resource.data.baseDomain`)
+	execCtx := NewExecutionContext(context.Background(), nil, nil)
+	execCtx.Params["baseDomain"] = testNewBaseDomain
+
+	results, err := re.ExecuteAll(context.Background(), []configloader.Resource{resource}, execCtx)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, StatusSuccess, results[0].Status)
+	assert.Equal(t, manifest.OperationRecreate, results[0].Operation)
+	assert.Contains(t, results[0].OperationReason, "recreated")
+	assert.True(t, mock.deleteCalled, "DeleteResource should have been called")
+	assert.True(t, mock.applyCalled, "ApplyResource should have been called")
+}
+
+func TestResourceExecutor_LifecycleRecreate_AsyncDeletion_ReturnsEarly(t *testing.T) {
+	// CEL=true, delete succeeds, but resource still present after delete (finalizers/async).
+	// Should return early with Operation=recreate, no apply called.
+	baseMock := k8sclient.NewMockK8sClient()
+	mock := &recreateMock{
+		MockK8sClient: baseMock,
+		getResults: []getResult{
+			{obj: testConfigMap, err: nil}, // pre-discovery
+			{obj: testConfigMap, err: nil}, // discover for delete
+			{obj: testConfigMap, err: nil}, // post-delete: still present
+		},
+	}
+
+	re := newResourceExecutor(&ExecutorConfig{
+		TransportClient: mock,
+		Logger:          logger.NewTestLogger(),
+	})
+
+	resource := newResourceWithLifecycleRecreate(
+		`resources.?test_resource.hasValue() && baseDomain != resources.test_resource.data.baseDomain`)
+	execCtx := NewExecutionContext(context.Background(), nil, nil)
+	execCtx.Params["baseDomain"] = testNewBaseDomain
+
+	results, err := re.ExecuteAll(context.Background(), []configloader.Resource{resource}, execCtx)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, StatusSuccess, results[0].Status)
+	assert.Equal(t, manifest.OperationRecreate, results[0].Operation)
+	assert.Contains(t, results[0].OperationReason, "deletion pending")
+	assert.True(t, mock.deleteCalled, "DeleteResource should have been called")
+	assert.False(t, mock.applyCalled, "ApplyResource should NOT have been called (deletion pending)")
+
+	// Resource should be stored in context (old object, not nil)
+	stored := execCtx.Resources["test_resource"]
+	assert.NotNil(t, stored, "resource should be stored in context (still present)")
+}
+
+func TestResourceExecutor_LifecycleRecreate_ResourceNotExist_SkipDeleteCreateDirectly(t *testing.T) {
+	// CEL expression doesn't use hasValue guard, evaluates to true even when resource
+	// doesn't exist. Should skip delete and go straight to create.
+	newCM := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata":   map[string]any{"name": "test-cm", "namespace": "default"},
+	}}
+
+	baseMock := k8sclient.NewMockK8sClient()
+	baseMock.ApplyResourceResult = &transportclient.ApplyResult{
+		Operation: manifest.OperationCreate,
+		Reason:    "resource not found",
+	}
+	mock := &recreateMock{
+		MockK8sClient: baseMock,
+		getResults: []getResult{
+			{obj: nil, err: testNotFoundErr}, // pre-discovery: not found
+			{obj: nil, err: testNotFoundErr}, // executeResourceRecreate: discover for delete: not found
+			{obj: newCM, err: nil},           // post-apply discovery
+		},
+	}
+
+	re := newResourceExecutor(&ExecutorConfig{
+		TransportClient: mock,
+		Logger:          logger.NewTestLogger(),
+	})
+
+	// Expression always true — no hasValue guard
+	resource := newResourceWithLifecycleRecreate(`true`)
+	execCtx := NewExecutionContext(context.Background(), nil, nil)
+
+	results, err := re.ExecuteAll(context.Background(), []configloader.Resource{resource}, execCtx)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, StatusSuccess, results[0].Status)
+	assert.Equal(t, manifest.OperationRecreate, results[0].Operation)
+	assert.False(t, mock.deleteCalled, "DeleteResource should NOT be called (resource doesn't exist)")
+	assert.True(t, mock.applyCalled, "ApplyResource should have been called")
+}
+
+func TestResourceExecutor_LifecycleRecreate_DeleteError(t *testing.T) {
+	// Delete fails → return error, don't attempt create.
+	baseMock := k8sclient.NewMockK8sClient()
+	baseMock.DeleteResourceError = errors.New("RBAC: forbidden")
+	mock := &recreateMock{
+		MockK8sClient: baseMock,
+		getResults: []getResult{
+			{obj: testConfigMap, err: nil}, // pre-discovery
+			{obj: testConfigMap, err: nil}, // discover for delete
+		},
+	}
+
+	re := newResourceExecutor(&ExecutorConfig{
+		TransportClient: mock,
+		Logger:          logger.NewTestLogger(),
+	})
+
+	resource := newResourceWithLifecycleRecreate(
+		`resources.?test_resource.hasValue() && baseDomain != resources.test_resource.data.baseDomain`)
+	execCtx := NewExecutionContext(context.Background(), nil, nil)
+	execCtx.Params["baseDomain"] = testNewBaseDomain
+
+	results, err := re.ExecuteAll(context.Background(), []configloader.Resource{resource}, execCtx)
+
+	require.Error(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, StatusFailed, results[0].Status)
+	assert.Contains(t, err.Error(), "failed to delete resource for recreation")
+	assert.True(t, mock.deleteCalled, "DeleteResource should have been called")
+	assert.False(t, mock.applyCalled, "ApplyResource should NOT be called after delete failure")
+}
+
+func TestResourceExecutor_LifecycleRecreate_WhenFalse_NormalUpdate(t *testing.T) {
+	// CEL=false → normal apply flow, no delete called.
+	baseMock := k8sclient.NewMockK8sClient()
+	baseMock.GetResourceResult = &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata":   map[string]any{"name": "test-cm", "namespace": "default"},
+		"data":       map[string]any{"baseDomain": "example.com"},
+	}}
+	baseMock.ApplyResourceResult = &transportclient.ApplyResult{
+		Operation: manifest.OperationUpdate,
+		Reason:    "generation changed",
+	}
+	mock := &recreateMock{MockK8sClient: baseMock}
+
+	re := newResourceExecutor(&ExecutorConfig{
+		TransportClient: mock,
+		Logger:          logger.NewTestLogger(),
+	})
+
+	resource := newResourceWithLifecycleRecreate(
+		`resources.?test_resource.hasValue() && baseDomain != resources.test_resource.data.baseDomain`)
+	execCtx := NewExecutionContext(context.Background(), nil, nil)
+	execCtx.Params["baseDomain"] = "example.com" // same value → CEL=false
+
+	results, err := re.ExecuteAll(context.Background(), []configloader.Resource{resource}, execCtx)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, StatusSuccess, results[0].Status)
+	assert.Equal(t, manifest.OperationUpdate, results[0].Operation)
+	assert.False(t, mock.deleteCalled, "DeleteResource should NOT be called (CEL=false)")
+}
+
+func TestResourceExecutor_LifecycleRecreate_InvalidCELExpression(t *testing.T) {
+	mock := k8sclient.NewMockK8sClient()
+	mock.GetResourceResult = &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1",
+		"kind":       "ConfigMap",
+		"metadata":   map[string]any{"name": "test-cm", "namespace": "default"},
+	}}
+
+	re := newResourceExecutor(&ExecutorConfig{
+		TransportClient: mock,
+		Logger:          logger.NewTestLogger(),
+	})
+
+	resource := newResourceWithLifecycleRecreate(`invalid %%% expression`)
+	execCtx := NewExecutionContext(context.Background(), nil, nil)
+
+	results, err := re.ExecuteAll(context.Background(), []configloader.Resource{resource}, execCtx)
+
+	require.Error(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, StatusFailed, results[0].Status)
+	assert.Contains(t, err.Error(), "lifecycle.recreate.when")
+}
+
+func TestResourceExecutor_LifecycleRecreate_NilConfig_NormalApply(t *testing.T) {
+	mock := k8sclient.NewMockK8sClient()
+	mock.ApplyResourceResult = &transportclient.ApplyResult{
+		Operation: manifest.OperationCreate,
+		Reason:    "mock create",
+	}
+
+	re := newResourceExecutor(&ExecutorConfig{
+		TransportClient: mock,
+		Logger:          logger.NewTestLogger(),
+	})
+
+	resource := configloader.Resource{
+		Name:      "test-resource",
+		Transport: &configloader.TransportConfig{Client: "kubernetes"},
+		Manifest: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata":   map[string]any{"name": "test-cm", "namespace": "default"},
+		},
+	}
+	execCtx := NewExecutionContext(context.Background(), nil, nil)
+
+	results, err := re.ExecuteAll(context.Background(), []configloader.Resource{resource}, execCtx)
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, manifest.OperationCreate, results[0].Operation)
+}
+
+func TestHasPreDiscoveryRequirement(t *testing.T) {
+	tests := []struct {
+		name      string
+		resources []configloader.Resource
+		want      bool
+	}{
+		{
+			name:      "empty list",
+			resources: nil,
+			want:      false,
+		},
+		{
+			name: "lifecycle.delete triggers pre-discovery",
+			resources: []configloader.Resource{
+				{Lifecycle: &configloader.ResourceLifecycle{
+					Delete: &configloader.LifecycleDelete{},
+				}},
+			},
+			want: true,
+		},
+		{
+			name: "lifecycle.recreate.when triggers pre-discovery",
+			resources: []configloader.Resource{
+				{Lifecycle: &configloader.ResourceLifecycle{
+					Recreate: &configloader.LifecycleRecreate{
+						When: &configloader.LifecycleWhen{Expression: "true"},
+					},
+				}},
+			},
+			want: true,
+		},
+		{
+			name: "no lifecycle or recreate",
+			resources: []configloader.Resource{
+				{Name: "plain"},
+			},
+			want: false,
+		},
+		{
+			name: "lifecycle.recreate with nil when",
+			resources: []configloader.Resource{
+				{Lifecycle: &configloader.ResourceLifecycle{
+					Recreate: &configloader.LifecycleRecreate{When: nil},
+				}},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, hasPreDiscoveryRequirement(tt.resources))
+		})
+	}
 }

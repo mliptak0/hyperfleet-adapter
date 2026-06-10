@@ -622,8 +622,8 @@ func TestExecutor_K8s_DiscoveryByLabels(t *testing.T) {
 	t.Logf("Second execution: %s (discovered by labels)", result2.ResourceResults[0].Operation)
 }
 
-// TestExecutor_K8s_RecreateOnChange tests the recreateOnChange behavior
-func TestExecutor_K8s_RecreateOnChange(t *testing.T) {
+// TestExecutor_K8s_LifecycleRecreate tests the lifecycle.recreate.when behavior
+func TestExecutor_K8s_LifecycleRecreate(t *testing.T) {
 	k8sEnv := SetupK8sTestEnv(t)
 	defer k8sEnv.Cleanup(t)
 
@@ -639,12 +639,16 @@ func TestExecutor_K8s_RecreateOnChange(t *testing.T) {
 
 	clusterID := fmt.Sprintf("recreate-cluster-%d", time.Now().UnixNano())
 
-	// Create config with recreateOnChange
+	// Create config with lifecycle.recreate (always recreate)
 	config := createK8sTestConfig(testNamespace)
 	config.Resources = []configloader.Resource{
 		{
-			Name:             "clusterConfigMap",
-			RecreateOnChange: true, // Enable recreate
+			Name: "clusterConfigMap",
+			Lifecycle: &configloader.ResourceLifecycle{
+				Recreate: &configloader.LifecycleRecreate{
+					When: &configloader.LifecycleWhen{Expression: "true"},
+				},
+			},
 			Manifest: map[string]interface{}{
 				"apiVersion": "v1",
 				"kind":       "ConfigMap",

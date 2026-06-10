@@ -318,7 +318,7 @@ resources:
 |-----------|------|-------------|
 | `create` | Resource doesn't exist | Creates new resource |
 | `update` | Resource exists | Updates existing resource |
-| `recreate` | `recreate_on_change: true` | Deletes and recreates |
+| `recreate` | `lifecycle.recreate.when` expression is `true` | Deletes and recreates |
 | `skip` | No changes needed | No operation performed |
 | `delete` | `lifecycle.delete.when` expression is `true` | Deletes the resource; remaining resources still processed |
 | `dry_run` | Dry run mode | Simulated operation |

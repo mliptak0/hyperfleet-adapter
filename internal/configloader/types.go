@@ -175,7 +175,7 @@ type KubernetesConfig struct {
 // Parameter represents a parameter extraction configuration.
 // Parameters are extracted from external sources (event data, env vars) using Source.
 type Parameter struct {
-	Default     interface{} `yaml:"default,omitempty"`
+	Default     any `yaml:"default,omitempty"`
 	Name        string      `yaml:"name" validate:"required"`
 	Source      string      `yaml:"source,omitempty" validate:"required"`
 	Type        string      `yaml:"type,omitempty"`
@@ -192,11 +192,11 @@ type Parameter struct {
 // - Use BuildRef to reference an external YAML file containing the build definition
 type Payload struct {
 	// Build contains a structure that will be evaluated and converted to JSON at runtime.
-	// The structure is kept as raw interface{} to allow flexible schema definitions.
+	// The structure is kept as raw any to allow flexible schema definitions.
 	// Mutually exclusive with BuildRef.
-	Build interface{} `yaml:"build,omitempty" validate:"required_without=BuildRef,excluded_with=BuildRef"`
+	Build any `yaml:"build,omitempty" validate:"required_without=BuildRef,excluded_with=BuildRef"`
 	// BuildRefContent holds the loaded content from BuildRef file (populated by loader)
-	BuildRefContent map[string]interface{} `yaml:"-"`
+	BuildRefContent map[string]any `yaml:"-"`
 	Name            string                 `yaml:"name" validate:"required"`
 	// BuildRef references an external YAML file containing the build definition.
 	// Mutually exclusive with Build.
@@ -265,7 +265,7 @@ type Header struct {
 type CaptureField struct {
 	// Default value to use when the field is absent from the API response.
 	// Only effective for field: captures; ignored for expression: captures.
-	Default            interface{} `yaml:"default,omitempty"`
+	Default            any `yaml:"default,omitempty"`
 	Name               string      `yaml:"name" validate:"required"`
 	FieldExpressionDef `yaml:",inline"`
 }
@@ -273,22 +273,22 @@ type CaptureField struct {
 // Condition represents a structured condition
 type Condition struct {
 	// Populated by UnmarshalYAML from "value" or "values"
-	Value    interface{} `yaml:"-"`
+	Value    any `yaml:"-"`
 	Field    string      `yaml:"field"`
 	Operator string      `yaml:"operator" validate:"required,validoperator"`
 }
 
 // conditionRaw is used for custom unmarshaling to support both "value" and "values" keys
 type conditionRaw struct {
-	Value interface{} `yaml:"value"`
+	Value any `yaml:"value"`
 	// Alias for Value
-	Values   interface{} `yaml:"values"`
+	Values   any `yaml:"values"`
 	Field    string      `yaml:"field"`
 	Operator string      `yaml:"operator"`
 }
 
 // UnmarshalYAML implements custom unmarshaling to support both "value" and "values" keys
-func (c *Condition) UnmarshalYAML(unmarshal func(interface{}) error) error {
+func (c *Condition) UnmarshalYAML(unmarshal func(any) error) error {
 	var raw conditionRaw
 	if err := unmarshal(&raw); err != nil {
 		return err
@@ -333,21 +333,21 @@ type MaestroTransportConfig struct {
 type Resource struct {
 	Name      string           `yaml:"name" validate:"required,resourcename"`
 	Transport *TransportConfig `yaml:"transport,omitempty"`
-	Manifest  interface{}      `yaml:"manifest,omitempty"`
+	Manifest  any              `yaml:"manifest,omitempty"`
 	Discovery *DiscoveryConfig `yaml:"discovery,omitempty" validate:"required"`
 	// NestedDiscoveries defines how to discover individual sub-resources
 	// within the applied manifest. For example, discovering resources
 	// inside a ManifestWork's workload.
-	// Lifecycle defines the resource lifecycle behavior, including deletion triggers and policy.
+	// Lifecycle defines the resource lifecycle behavior, including deletion and recreation triggers.
 	// If not set, the resource uses the default apply-only behavior.
 	Lifecycle         *ResourceLifecycle `yaml:"lifecycle,omitempty"`
 	NestedDiscoveries []NestedDiscovery  `yaml:"nested_discoveries,omitempty" validate:"dive"`
-	RecreateOnChange  bool               `yaml:"recreate_on_change,omitempty"`
 }
 
 // ResourceLifecycle defines the lifecycle behavior for a resource.
 type ResourceLifecycle struct {
-	Delete *LifecycleDelete `yaml:"delete,omitempty"`
+	Delete   *LifecycleDelete   `yaml:"delete,omitempty"`
+	Recreate *LifecycleRecreate `yaml:"recreate,omitempty"`
 }
 
 // LifecycleDelete defines the deletion behavior for a resource.
@@ -359,11 +359,17 @@ type LifecycleDelete struct {
 	PropagationPolicy string `yaml:"propagationPolicy,omitempty"`
 }
 
-// LifecycleWhen defines the condition for when deletion should occur.
+// LifecycleRecreate defines the recreation behavior for a resource.
+type LifecycleRecreate struct {
+	// When defines the CEL expression that determines when to recreate the resource.
+	When *LifecycleWhen `yaml:"when,omitempty"`
+}
+
+// LifecycleWhen defines the condition for when a lifecycle event should occur.
 type LifecycleWhen struct {
 	// Expression is a CEL expression evaluated each reconciliation loop.
-	// The resource is deleted only when the expression evaluates to true.
-	// Required when lifecycle.delete is configured.
+	// The lifecycle event occurs only when the expression evaluates to true.
+	// Required when lifecycle.delete or lifecycle.recreate is configured.
 	Expression string `yaml:"expression,omitempty"`
 }
 

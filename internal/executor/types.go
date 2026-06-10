@@ -85,7 +85,7 @@ type ExecutionResult struct {
 	// ExecutionContext contains the full execution context (for testing and debugging)
 	ExecutionContext *ExecutionContext
 	// Params contains the extracted parameters
-	Params map[string]interface{}
+	Params map[string]any
 	// Errors contains errors keyed by the phase where they occurred
 	Errors map[ExecutionPhase]error
 	// SkipReason is why resources were skipped (e.g., "precondition not met")
@@ -109,7 +109,7 @@ type PreconditionResult struct {
 	// Error is the error if Status is StatusFailed
 	Error error
 	// CapturedFields contains fields captured from the API response
-	CapturedFields map[string]interface{}
+	CapturedFields map[string]any
 	// CELResult contains CEL evaluation result (if expression was used)
 	CELResult *criteria.CELResult
 	// Name is the precondition name
@@ -143,7 +143,7 @@ type ResourceResult struct {
 	ResourceName string
 	// OperationReason explains why this operation was performed
 	// Examples: "resource not found", "generation changed from 1 to 2",
-	// "generation 1 unchanged", "recreate_on_change=true"
+	// "generation 1 unchanged", "recreateOnChange=true"
 	OperationReason string
 	// Status is the result status
 	Status ExecutionStatus
@@ -178,15 +178,15 @@ type ExecutionContext struct {
 	// Config is the unified adapter configuration
 	Config *configloader.Config
 	// EventData is the parsed event data payload
-	EventData map[string]interface{}
+	EventData map[string]any
 	// Params holds extracted parameters and captured fields
 	// - Populated during param extraction phase with event/env data
 	// - Populated during precondition phase with captured API response fields
-	Params map[string]interface{}
+	Params map[string]any
 	// Resources holds discovered resources keyed by resource name.
 	// Nested discoveries are also added as top-level entries keyed by nested discovery name.
 	// Values are expected to be *unstructured.Unstructured.
-	Resources map[string]interface{}
+	Resources map[string]any
 	// Evaluations tracks all condition evaluations for debugging/auditing
 	Evaluations []EvaluationRecord
 	// Adapter holds adapter execution metadata
@@ -258,15 +258,15 @@ type ExecutionError struct {
 // NewExecutionContext creates a new execution context
 func NewExecutionContext(
 	ctx context.Context,
-	eventData map[string]interface{},
+	eventData map[string]any,
 	config *configloader.Config,
 ) *ExecutionContext {
 	return &ExecutionContext{
 		Ctx:         ctx,
 		Config:      config,
 		EventData:   eventData,
-		Params:      make(map[string]interface{}),
-		Resources:   make(map[string]interface{}),
+		Params:      make(map[string]any),
+		Resources:   make(map[string]any),
 		Evaluations: make([]EvaluationRecord, 0),
 		Adapter: AdapterMetadata{
 			ExecutionStatus: string(StatusSuccess),
@@ -360,8 +360,8 @@ func (ec *ExecutionContext) SetSkipped(reason, message string) {
 
 // GetCELVariables returns all variables for CEL evaluation.
 // This includes Params, adapter metadata, and resources.
-func (ec *ExecutionContext) GetCELVariables() map[string]interface{} {
-	result := make(map[string]interface{})
+func (ec *ExecutionContext) GetCELVariables() map[string]any {
+	result := make(map[string]any)
 
 	// Copy all params
 	for k, v := range ec.Params {
@@ -377,7 +377,7 @@ func (ec *ExecutionContext) GetCELVariables() map[string]interface{} {
 	// "!resources.?clusterJob.hasValue()" correctly evaluates to true when a
 	// resource is confirmed deleted. Use "adapter.?resourcesSkipped.orValue(false)"
 	// to distinguish "deleted" from "never processed" in Finalized conditions.
-	resources := make(map[string]interface{})
+	resources := make(map[string]any)
 	for name, val := range ec.Resources {
 		if val == nil {
 			continue // deleted resources are absent from CEL; resources.?X.hasValue() returns false
@@ -388,7 +388,7 @@ func (ec *ExecutionContext) GetCELVariables() map[string]interface{} {
 				resources[name] = v.Object
 			}
 		case map[string]*unstructured.Unstructured:
-			nested := make(map[string]interface{})
+			nested := make(map[string]any)
 			for nestedName, nestedRes := range v {
 				if nestedRes != nil {
 					nested[nestedName] = nestedRes.Object
